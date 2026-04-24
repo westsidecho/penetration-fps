@@ -67,11 +67,17 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
 #pointerLockHint{position:absolute;left:50%;top:60%;transform:translateX(-50%);background:rgba(0,0,0,.7);padding:12px 24px;font-size:12px;letter-spacing:2px;display:none;border:1px solid #ff4655}
 
 /* Gun Select */
-#gunSelect{position:fixed;inset:0;background:linear-gradient(135deg,#0f0f1a 0%,#1a0f1f 100%);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:110;padding:20px}
+#gunSelect{position:fixed;inset:0;background:linear-gradient(135deg,#0f0f1a 0%,#1a0f1f 100%);display:none;flex-direction:column;align-items:center;justify-content:flex-start;z-index:110;padding:40px 20px;overflow-y:auto;overflow-x:hidden;scroll-behavior:smooth}
 #gunSelect.active{display:flex}
-#gunSelect h1{font-size:42px;font-weight:900;letter-spacing:6px;color:#ff4655;margin-bottom:8px}
-#gunSelect .sub{font-size:12px;color:#888;letter-spacing:3px;margin-bottom:30px}
-#gunGrid{display:grid;grid-template-columns:repeat(4,220px);gap:14px;max-width:92vw}
+#gunSelect::-webkit-scrollbar{width:10px}
+#gunSelect::-webkit-scrollbar-track{background:rgba(0,0,0,.3)}
+#gunSelect::-webkit-scrollbar-thumb{background:#ff4655;border-radius:5px}
+#gunSelect h1{font-size:42px;font-weight:900;letter-spacing:6px;color:#ff4655;margin-bottom:8px;flex-shrink:0}
+#gunSelect .sub{font-size:12px;color:#888;letter-spacing:3px;margin-bottom:30px;flex-shrink:0}
+#gunGrid{display:grid;grid-template-columns:repeat(4,220px);gap:14px;max-width:92vw;flex-shrink:0}
+@media(max-width:980px){#gunGrid{grid-template-columns:repeat(3,220px)}}
+@media(max-width:740px){#gunGrid{grid-template-columns:repeat(2,220px)}}
+@media(max-width:500px){#gunGrid{grid-template-columns:repeat(1,85vw)}}
 .gunCard{background:rgba(20,20,30,.85);border:1px solid #333;padding:14px;cursor:pointer;transition:all .15s;position:relative;overflow:hidden}
 .gunCard:hover{border-color:#ff4655;transform:translateY(-4px);background:rgba(30,20,30,.95)}
 .gunCard.selected{border-color:#ff4655;background:rgba(255,70,85,.08);box-shadow:0 0 20px rgba(255,70,85,.3)}
@@ -95,6 +101,11 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
 #hudCoins{position:absolute;top:20px;right:30px;color:#fbbf24;font-size:16px;font-weight:900;letter-spacing:2px;text-shadow:0 0 4px #000}
 #hudCoins::before{content:'◆ ';color:#fbbf24}
 .coinPop{position:absolute;font-weight:900;font-size:18px;color:#fbbf24;text-shadow:0 0 6px #000;animation:dmgFloat .9s ease-out forwards;pointer-events:none}
+@keyframes tpFlash{0%{opacity:0}15%{opacity:1}100%{opacity:0}}
+@keyframes tpLabel{0%{opacity:0;transform:translate(-50%,-50%) scale(.3);filter:blur(10px)}30%{opacity:1;transform:translate(-50%,-50%) scale(1);filter:blur(0)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.4);filter:blur(4px)}}
+.gunCard:not(.locked){cursor:pointer;position:relative}
+.gunCard:not(.locked)::after{content:'▸ DEPLOY';position:absolute;bottom:10px;left:50%;transform:translateX(-50%);color:#ff4655;font-size:10px;font-weight:900;letter-spacing:3px;opacity:0;transition:opacity .15s;pointer-events:none}
+.gunCard:not(.locked):hover::after{opacity:1}
 #gunSelect .footer{margin-top:30px;display:flex;gap:12px}
 #gunSelect button{padding:14px 40px;background:transparent;border:1px solid #ff4655;color:#fff;font-size:14px;letter-spacing:3px;cursor:pointer;font-weight:700;transition:all .15s}
 #gunSelect button:hover{background:#ff4655;color:#0f0f1a}
@@ -136,7 +147,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
   <div id="gunGrid"></div>
   <div class="footer">
     <button onclick="backToMenu()">BACK</button>
-    <button id="deployBtn" onclick="deployWithGun()" disabled>DEPLOY</button>
+    <div style="color:#888;font-size:11px;letter-spacing:2px;padding:14px 0;">▸ CLICK ANY UNLOCKED WEAPON TO TELEPORT INTO BATTLE</div>
   </div>
   <div id="loadingMsg">LOADING ARSENAL...</div>
 </div>
@@ -493,8 +504,9 @@ function populateGunGrid() {
       card.addEventListener('click', () => {
         document.querySelectorAll('.gunCard').forEach(c => c.classList.remove('selected'));
         card.classList.add('selected');
-        document.getElementById('deployBtn').disabled = false;
         selectedWeaponKey = key;
+        // Instant teleport to map with this gun
+        teleportToMap(key);
       });
     }
     grid.appendChild(card);
@@ -502,8 +514,45 @@ function populateGunGrid() {
 }
 function deployWithGun() {
   if (!selectedWeaponKey) return;
-  equipGun(selectedWeaponKey);
+  teleportToMap(selectedWeaponKey);
+}
+
+function teleportToMap(key) {
+  // Reset player state on teleport
+  player.health = 100;
+  player.armor = 50;
+  player.pos.set(0, 1.7, 15);
+  player.vel.set(0,0,0);
+  player.kills = 0;
+  document.getElementById('killCount').textContent = '0';
+
+  // Revive any dead enemies / respawn fresh squad
+  for (const e of [...enemies]) {
+    scene.remove(e.group);
+  }
+  enemies.length = 0;
+  for (let i=0; i<6; i++) {
+    const angle = (i/6) * Math.PI * 2;
+    createEnemy(Math.cos(angle)*15, Math.sin(angle)*15 - 5);
+  }
+
+  equipGun(key);
   document.getElementById('gunSelect').classList.remove('active');
+  document.getElementById('gameOver').style.display = 'none';
+
+  // Teleport flash overlay
+  const tp = document.createElement('div');
+  tp.style.cssText = 'position:fixed;inset:0;background:#fff;z-index:300;pointer-events:none;animation:tpFlash .6s ease-out forwards';
+  document.body.appendChild(tp);
+  setTimeout(() => tp.remove(), 600);
+
+  // Teleport label
+  const label = document.createElement('div');
+  label.textContent = '▸ TELEPORTING TO ARENA ◂';
+  label.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#ff4655;font-size:32px;font-weight:900;letter-spacing:8px;z-index:310;text-shadow:0 0 20px #ff4655;pointer-events:none;animation:tpLabel .8s ease-out forwards';
+  document.body.appendChild(label);
+  setTimeout(() => label.remove(), 800);
+
   startGame();
 }
 
