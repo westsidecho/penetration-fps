@@ -446,8 +446,17 @@ loader.load('models/guns_low_poly.glb', (gltf) => {
 
 function findGunNode(key) {
   if (!gunsGLB) return null;
+  // Try parent group first (e.g. "BE1"), fallback to mesh node ("BE1_Grey_0")
   let found = null;
   gunsGLB.traverse(n => { if (n.name === key) found = n; });
+  if (found) {
+    // Make sure it actually contains at least one mesh
+    let hasMesh = false;
+    found.traverse(c => { if (c.isMesh) hasMesh = true; });
+    if (hasMesh) return found;
+  }
+  const meshName = key + '_Grey_0';
+  gunsGLB.traverse(n => { if (n.name === meshName) found = n; });
   return found;
 }
 
@@ -462,6 +471,15 @@ function equipGun(key) {
     const clone = src.clone(true);
     clone.updateMatrixWorld(true);
 
+    // Per-weapon tint so each of the 14 models reads differently
+    const GUN_COLORS = {
+      BE1:0x4a4a50, BE2:0x3d3d42, BE3:0x5a4030, BE4:0x3a3f45, BE5:0x2f3540,
+      GL1:0x4d3020,
+      MG1:0x3a3a3a, MG2:0x454545, MG3:0x2e2e32, MG4:0x555560, MG5:0x3a3328,
+      MSR:0x2a2e38, RPG:0x4a3a20, SNIPER1:0x262628,
+    };
+    const tint = GUN_COLORS[key] || 0x3d3d42;
+
     // Collect all meshes, bake each mesh's world transform into a fresh geometry,
     // then add meshes to a flat group at identity. This eliminates nested scales.
     const flat = new THREE.Group();
@@ -470,7 +488,7 @@ function equipGun(key) {
         const geo = c.geometry.clone();
         geo.applyMatrix4(c.matrixWorld);
         const mat = new THREE.MeshStandardMaterial({
-          color: 0x3d3d42, metalness: 0.7, roughness: 0.35,
+          color: tint, metalness: 0.65, roughness: 0.4,
         });
         const m = new THREE.Mesh(geo, mat);
         m.castShadow = false;
