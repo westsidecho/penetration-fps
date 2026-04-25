@@ -464,14 +464,15 @@ function equipGun(key) {
   // Remove existing gun from camera
   if (gun.parent) gun.parent.remove(gun);
   gun = new THREE.Group();
+  gun.name = 'GUN_' + key;
 
   const src = findGunNode(key);
   if (src) {
-    // --- Step 1: bake world matrix into geometry so internal scaling collapses ---
+    // Step 1: clone and bake world matrix into geometries so nested transforms collapse
     const clone = src.clone(true);
     clone.updateMatrixWorld(true);
 
-    // Per-weapon tint so each of the 14 models reads differently
+    // Per-weapon tint
     const GUN_COLORS = {
       BE1:0x4a4a50, BE2:0x3d3d42, BE3:0x5a4030, BE4:0x3a3f45, BE5:0x2f3540,
       GL1:0x4d3020,
@@ -480,15 +481,14 @@ function equipGun(key) {
     };
     const tint = GUN_COLORS[key] || 0x3d3d42;
 
-    // Collect all meshes, bake each mesh's world transform into a fresh geometry,
-    // then add meshes to a flat group at identity. This eliminates nested scales.
+    // Flat: all meshes baked to world coords, identity local transforms
     const flat = new THREE.Group();
     clone.traverse(c => {
-      if (c.isMesh) {
+      if (c.isMesh && c.geometry) {
         const geo = c.geometry.clone();
         geo.applyMatrix4(c.matrixWorld);
         const mat = new THREE.MeshStandardMaterial({
-          color: tint, metalness: 0.65, roughness: 0.4,
+          color: tint, metalness: 0.6, roughness: 0.45,
         });
         const m = new THREE.Mesh(geo, mat);
         m.castShadow = false;
@@ -496,72 +496,84 @@ function equipGun(key) {
       }
     });
 
-    // --- Step 2: measure flat bbox (now in clean world coords) ---
+    // Step 2: measure & center in mesh space
     const box = new THREE.Box3().setFromObject(flat);
     const size = new THREE.Vector3(); box.getSize(size);
     const center = new THREE.Vector3(); box.getCenter(center);
-
-    // Shift every mesh so gun is centered at origin in its own space
     flat.children.forEach(m => {
       m.geometry.translate(-center.x, -center.y, -center.z);
+      m.geometry.computeBoundingBox();
+      m.geometry.computeVertexNormals();
     });
 
     const maxDim = Math.max(size.x, size.y, size.z);
-    const targetLen = 0.55;
+    // Bigger so the gun reads clearly in FOV (reference AK style)
+    const targetLen = 0.85;
     const scale = targetLen / Math.max(maxDim, 0.001);
 
-    console.log('[equipGun]', key, 'raw size=', size.toArray(), 'maxDim=', maxDim, 'scale=', scale);
+    console.log('[equipGun]', key, 'meshes=', flat.children.length,
+                'rawSize=', size.toArray().map(v=>v.toFixed(2)),
+                'maxDim=', maxDim.toFixed(2), 'scale=', scale.toFixed(4));
 
-    // Orient barrel along -Z (camera forward). Longest axis -> barrel.
+    // Orient barrel along -Z (camera forward).
+    // Longest axis is the barrel direction in original model space.
     const gunWrap = new THREE.Group();
     gunWrap.add(flat);
     gunWrap.scale.setScalar(scale);
 
     if (size.x >= size.y && size.x >= size.z) {
-      // Barrel along X -> rotate to -Z
-      gunWrap.rotation.y = -Math.PI/2;
+      // X is longest -> barrel along +X. Rotate around Y by +90deg so +X -> -Z.
+      gunWrap.rotation.y = Math.PI / 2;
     } else if (size.z >= size.x && size.z >= size.y) {
-      // Barrel along Z -> may already face forward, flip if needed
+      // Z is longest -> barrel along +Z. Flip 180 so +Z -> -Z.
       gunWrap.rotation.y = Math.PI;
     } else {
-      // Barrel along Y -> tilt forward
-      gunWrap.rotation.x = -Math.PI/2;
+      // Y is longest -> barrel along +Y. Tilt forward so +Y -> -Z.
+      gunWrap.rotation.x = Math.PI / 2;
     }
 
     gun.add(gunWrap);
   } else {
-    const fb = new THREE.Mesh(
-      new THREE.BoxGeometry(0.15, 0.2, 1.2),
-      new THREE.MeshStandardMaterial({ color:0x1a1a1a, metalness:0.8 })
+    // Fallback simple rifle shape
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 0.18, 0.85),
+      new THREE.MeshStandardMaterial({ color:0x222226, metalness:0.7, roughness:0.4 })
     );
-    gun.add(fb);
+    body.position.z = -0.2;
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.025, 0.025, 0.5, 12),
+      new THREE.MeshStandardMaterial({ color:0x111111, metalness:0.85, roughness:0.25 })
+    );
+    barrel.rotation.x = Math.PI/2;
+    barrel.position.set(0, 0.04, -0.55);
+    gun.add(body, barrel);
   }
 
-  // Hand / arm model - simple skin-tone gripping the gun
-  const handMat = new THREE.MeshStandardMaterial({ color:0xd4a574, roughness:0.8 });
+  // Hand / forearm gripping the rifle
+  const handMat = new THREE.MeshStandardMaterial({ color:0xd4a574, roughness:0.85 });
   const sleeveMat = new THREE.MeshStandardMaterial({ color:0x2d3d2d, roughness:0.9 });
-  const hand = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.09, 0.1), handMat);
-  hand.position.set(-0.05, -0.14, 0.05);
+  const hand = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.09, 0.12), handMat);
+  hand.position.set(-0.04, -0.14, -0.02);
   gun.add(hand);
-  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.45), sleeveMat);
-  arm.position.set(0.02, -0.24, 0.35);
-  arm.rotation.z = -0.25;
-  arm.rotation.x = 0.35;
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.5), sleeveMat);
+  arm.position.set(0.04, -0.26, 0.28);
+  arm.rotation.z = -0.28;
+  arm.rotation.x = 0.4;
   gun.add(arm);
 
-  // Muzzle flash at barrel tip (forward)
+  // Muzzle flash at barrel tip
   flash = new THREE.Mesh(
-    new THREE.SphereGeometry(0.22, 10, 10),
+    new THREE.SphereGeometry(0.18, 10, 10),
     new THREE.MeshBasicMaterial({ color:0xffcc44, transparent:true, opacity:0 })
   );
-  flash.position.set(0, 0.02, -0.55);
+  flash.position.set(0, 0.02, -0.7);
   gun.add(flash);
 
-  // Position gun prominent in lower-right (AK-47 reference style)
-  gun.position.set(0.28, -0.28, -0.5);
+  // Place gun prominently in bottom-right of FOV
+  gun.position.set(0.32, -0.28, -0.55);
   gun.rotation.y = -0.18;
-  gun.rotation.x = 0.04;
-  gun.rotation.z = 0.06;
+  gun.rotation.x = 0.05;
+  gun.rotation.z = 0.07;
   camera.add(gun);
 
   selectedWeaponKey = key;
@@ -639,6 +651,13 @@ function deployWithGun() {
 }
 
 function teleportToMap(key) {
+  // Wait for GLB if not yet loaded
+  if (!gunsGLB) {
+    document.getElementById('loadingMsg').style.display = 'block';
+    document.getElementById('loadingMsg').textContent = 'LOADING WEAPONS…';
+    setTimeout(() => teleportToMap(key), 200);
+    return;
+  }
   // Reset player state on teleport
   player.health = 100;
   player.armor = 50;
