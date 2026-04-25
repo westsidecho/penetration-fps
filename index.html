@@ -252,6 +252,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
     <div style="color:#10b981;font-size:11px;letter-spacing:2px;padding:14px 0;">▸ ALL WEAPONS FREE — CLICK ANY GUN TO TELEPORT INTO BATTLE</div>
   </div>
   <div id="loadingMsg">LOADING ARSENAL...</div>
+  <div id="mapLoadingMsg" style="color:#fbbf24;font-size:14px;letter-spacing:3px;margin-top:8px">LOADING MAP…</div>
 </div>
 
 <div id="hud">
@@ -426,125 +427,71 @@ function createBlock(x, y, z, w, h, d, color) {
   return mesh;
 }
 
-// ── CENTER 3-TIER TOWER ──
-// Tier 1 base (top y=2)
-createBlock(0, 1, 0, 6, 2, 6, 0xeeeae0);
-// Tier 2 platform (top y=4) — RED accent
-createBlock(0, 3, 0, 4, 2, 4, 0xff4655);
-// Tier 3 sniper crow's nest (top y=6) — DARK with railings
-createBlock(0, 5, 0, 2.4, 2, 2.4, 0x2a2e3a);
-// Sniper rail on top of tier 3
-createBlock( 1.2, 6.4, 0,   0.2, 0.8, 2.4, 0xfbbf24);
-createBlock(-1.2, 6.4, 0,   0.2, 0.8, 2.4, 0xfbbf24);
-createBlock( 0,   6.4,  1.2, 2.4, 0.8, 0.2, 0xfbbf24);
+// ── GLB MAP (loaded async — populates `walls` once ready) ──
+let mapLoaded = false;
+let mapMeshes = [];   // for raycasting (bullets, ground LoS)
+let mapRoot = null;
 
-// Stairs from south up to tier 1 (z = 5..3)
-for (let i=0; i<4; i++) createBlock(0, 0.25 + i*0.5, 5 - i*1, 4, 0.5, 1, 0xcfc8b8);
-// Stairs from tier 1 up to tier 2 (north side, z = -3..-1)
-for (let i=0; i<4; i++) createBlock(0, 2.25 + i*0.5, -3 + i*0.7, 3, 0.5, 0.7, 0xcfc8b8);
-// Stairs from tier 2 up to tier 3 (east side, x = 2..3.4)
-for (let i=0; i<4; i++) createBlock(2 + i*0.5, 4.25 + i*0.5, 0, 0.5, 0.5, 2, 0xcfc8b8);
+const mapLoader = new THREE.GLTFLoader();
+mapLoader.load('models/fps_tdm_map.glb', (gltf) => {
+  const map = gltf.scene;
 
-// ── 4 CORNER TEAM TOWERS (sniper perches) ──
-const towers = [
-  { x:-18, z:-18, c:0xff4655 },  // RED   NW
-  { x: 18, z:-18, c:0x3b6dff },  // BLUE  NE
-  { x:-18, z: 18, c:0xfbbf24 },  // YELLOW SW
-  { x: 18, z: 18, c:0x10b981 },  // GREEN  SE
-];
-towers.forEach(t => {
-  // Tower block (top y=3)
-  createBlock(t.x, 1.5, t.z, 3, 3, 3, t.c);
-  // Side wall on top so you can crouch behind
-  createBlock(t.x + Math.sign(-t.x)*1.4, 3.6, t.z, 0.3, 1.2, 3, 0xeeeae0);
-  // Stairs from inner corner toward center
-  const sx = -Math.sign(t.x), sz = -Math.sign(t.z);
-  for (let i=0; i<5; i++) {
-    createBlock(
-      t.x + sx*(2 + i*0.7),
-      0.3 + i*0.5,
-      t.z + sz*(2 + i*0.7),
-      1.6, 0.5, 1.6, 0xddd5c0
-    );
+  // Auto-fit to a ~80x80 arena, ground at y=0
+  map.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(map);
+  const sz = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(sz.x, sz.z);
+  const targetMax = 80;
+  if (maxDim > 0) map.scale.setScalar(targetMax / maxDim);
+  map.updateMatrixWorld(true);
+  const box2 = new THREE.Box3().setFromObject(map);
+  const center2 = box2.getCenter(new THREE.Vector3());
+  map.position.x -= center2.x;
+  map.position.z -= center2.z;
+  map.position.y -= box2.min.y; // sit bottom on y=0
+  map.updateMatrixWorld(true);
+
+  scene.add(map);
+  mapRoot = map;
+
+  // Build collision colliders from each mesh's world AABB
+  let totalMeshes = 0, colliderCount = 0;
+  map.traverse(c => {
+    if (!c.isMesh) return;
+    totalMeshes++;
+    c.castShadow = true;
+    c.receiveShadow = true;
+    if (c.geometry && !c.geometry.boundingBox) c.geometry.computeBoundingBox();
+    mapMeshes.push(c);
+    const aabb = new THREE.Box3().setFromObject(c);
+    const meshSz = aabb.getSize(new THREE.Vector3());
+    // Skip the floor itself (huge, flat) — handled by floor plane
+    if (meshSz.x > 50 && meshSz.z > 50 && meshSz.y < 1) return;
+    // Skip ultra-small fragments
+    if (meshSz.x < 0.1 && meshSz.y < 0.1 && meshSz.z < 0.1) return;
+    walls.push({ mesh: c, penType: 'Solid', aabb });
+    c.userData.penType = 'Solid';
+    c.userData.isWall = true;
+    colliderCount++;
+  });
+  console.log(`Map: ${totalMeshes} meshes, ${colliderCount} colliders`);
+
+  mapLoaded = true;
+  const lm = document.getElementById('mapLoadingMsg');
+  if (lm) lm.style.display = 'none';
+}, (xhr) => {
+  if (xhr.lengthComputable) {
+    const pct = (xhr.loaded / xhr.total * 100).toFixed(0);
+    const lm = document.getElementById('mapLoadingMsg');
+    if (lm) lm.textContent = `LOADING MAP… ${pct}%`;
   }
+}, (err) => {
+  console.error('Map GLB load error', err);
+  const lm = document.getElementById('mapLoadingMsg');
+  if (lm) { lm.textContent = 'MAP LOAD FAILED — using empty arena'; lm.style.color = '#ff4655'; }
+  // Fallback: keep just the floor + a small box at center
+  createBlock(0, 1, 0, 4, 2, 4, 0xff4655);
 });
-
-// ── MID-SIDE SHIPPING CONTAINERS (bright cover) ──
-const containers = [
-  { x:-12, y:1.25, z: 0,  w:2,   h:2.5, d:6,   c:0xf97316 },  // ORANGE west
-  { x: 12, y:1.25, z: 0,  w:2,   h:2.5, d:6,   c:0xa855f7 },  // PURPLE east
-  { x: 0,  y:1.25, z:-12, w:6,   h:2.5, d:2,   c:0x22d3ee },  // CYAN north
-  { x: 0,  y:1.25, z: 12, w:6,   h:2.5, d:2,   c:0xf472b6 },  // PINK south (behind spawn)
-];
-containers.forEach(c => createBlock(c.x, c.y, c.z, c.w, c.h, c.d, c.c));
-
-// ── PENETRATION WALLS (gameplay-critical for bullet pen mechanic) ──
-createWall(-7, 1.5, -7, 4, 3, 0.8, 'High');     // brown thick
-createWall( 7, 1.5,  7, 4, 3, 0.5, 'Medium');
-createWall(-7, 1.5,  7, 4, 3, 0.3, 'Low');      // thin tan
-createWall( 7, 1.5, -7, 4, 3, 0.3, 'Low');
-createWall(-15, 1.5,  6, 0.4, 3, 5, 'Medium');
-createWall( 15, 1.5, -6, 0.4, 3, 5, 'Medium');
-
-// ── SCATTERED COVER CRATES (Roblox-style bright crates) ──
-const crateColors = [0xff4655, 0x3b6dff, 0xfbbf24, 0x10b981, 0xa855f7, 0xf97316, 0x22d3ee, 0xf472b6];
-let placed = 0, attempts = 0;
-while (placed < 12 && attempts < 60) {
-  attempts++;
-  const x = (Math.random()-0.5)*40;
-  const z = (Math.random()-0.5)*40;
-  // Avoid spawn area / center / corner towers
-  if (Math.abs(x) < 2 && Math.abs(z-15) < 3) continue;
-  if (Math.abs(x) < 5 && Math.abs(z) < 5) continue;
-  if (Math.hypot(x-18, z-18) < 5 || Math.hypot(x+18, z-18) < 5) continue;
-  if (Math.hypot(x-18, z+18) < 5 || Math.hypot(x+18, z+18) < 5) continue;
-  createBlock(x, 0.6, z, 1.2, 1.2, 1.2, crateColors[placed % crateColors.length]);
-  placed++;
-}
-
-// ── PERIMETER (high bright wall) ──
-[
-  [ 0, 3,-25, 50,6,1, 0x4a546a],
-  [ 0, 3, 25, 50,6,1, 0x4a546a],
-  [-25,3, 0,  1,6,50, 0x4a546a],
-  [ 25,3, 0,  1,6,50, 0x4a546a],
-].forEach(p => createBlock(p[0],p[1],p[2],p[3],p[4],p[5],p[6]));
-
-// Bright accent strip on top of perimeter
-[
-  [ 0, 6.2,-25, 50, 0.4, 1, 0xfbbf24],
-  [ 0, 6.2, 25, 50, 0.4, 1, 0xfbbf24],
-  [-25, 6.2, 0, 1, 0.4, 50, 0xfbbf24],
-  [ 25, 6.2, 0, 1, 0.4, 50, 0xfbbf24],
-].forEach(p => {
-  const m = new THREE.Mesh(
-    new THREE.BoxGeometry(p[3], p[4], p[5]),
-    new THREE.MeshStandardMaterial({ color: p[6], emissive: p[6], emissiveIntensity: 0.4 })
-  );
-  m.position.set(p[0], p[1], p[2]); scene.add(m);  // cosmetic only — no collision
-});
-
-// ── DECORATIVE PILLARS (outside arena, cosmetic only) ──
-function makePillar(x, z, h, color) {
-  const m = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.5, 0.5, h, 8),
-    new THREE.MeshStandardMaterial({ color, roughness:0.6 })
-  );
-  m.position.set(x, h/2, z); m.castShadow = true;
-  scene.add(m);
-  // Glowing top
-  const top = new THREE.Mesh(
-    new THREE.SphereGeometry(0.55, 10, 8),
-    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6 })
-  );
-  top.position.set(x, h+0.4, z); scene.add(top);
-}
-const decoColors = [0xff4655, 0x3b6dff, 0xfbbf24, 0x10b981, 0xa855f7, 0x22d3ee, 0xf472b6];
-for (let i=0; i<14; i++) {
-  const a = (i/14)*Math.PI*2;
-  const r = 33 + (i%3)*2;
-  makePillar(Math.cos(a)*r, Math.sin(a)*r, 7+(i%4), decoColors[i%decoColors.length]);
-}
 
 // ══════════════════════════════════════════════════════
 //   PLAYER
@@ -1342,17 +1289,18 @@ function deployWithGun() {
 }
 
 function teleportToMap(key) {
-  // Wait for GLB if not yet loaded
-  if (!gunsGLB) {
+  // Wait for GLBs if not yet loaded
+  if (!gunsGLB || !mapLoaded) {
     document.getElementById('loadingMsg').style.display = 'block';
-    document.getElementById('loadingMsg').textContent = 'LOADING WEAPONS…';
+    document.getElementById('loadingMsg').textContent = !gunsGLB ? 'LOADING WEAPONS…' : 'LOADING MAP…';
     setTimeout(() => teleportToMap(key), 200);
     return;
   }
   // Reset player state on teleport
   player.health = 100;
   player.armor = 50;
-  player.pos.set(0, 1.7, 15);
+  const sp = safeSpawn(28, 5, 24);
+  player.pos.copy(sp);
   player.vel.set(0,0,0);
   player.kills = 0;
   document.getElementById('killCount').textContent = '0';
