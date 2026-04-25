@@ -504,8 +504,8 @@ function equipGun(key) {
     });
 
     const maxDim = Math.max(size.x, size.y, size.z);
-    // Bigger so the gun reads clearly in FOV (reference AK style)
-    const targetLen = 0.85;
+    // Bigger so the gun fills the FOV like the AK reference image
+    const targetLen = 1.5;
     const scale = targetLen / Math.max(maxDim, 0.001);
 
     console.log('[equipGun]', key, 'meshes=', flat.children.length,
@@ -574,11 +574,11 @@ function equipGun(key) {
   flash.position.set(0, 0.02, -0.7);
   gun.add(flash);
 
-  // Place gun prominently in bottom-right of FOV
-  gun.position.set(0.32, -0.28, -0.55);
-  gun.rotation.y = -0.18;
-  gun.rotation.x = 0.05;
-  gun.rotation.z = 0.07;
+  // Place gun prominently in bottom-right of FOV (AK reference scale)
+  gun.position.set(0.4, -0.35, -0.65);
+  gun.rotation.y = -0.2;
+  gun.rotation.x = 0.06;
+  gun.rotation.z = 0.08;
   camera.add(gun);
 
   selectedWeaponKey = key;
