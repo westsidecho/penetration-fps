@@ -82,6 +82,33 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
 
 /* Gun Select */
 #gunSelect{position:fixed;inset:0;background:linear-gradient(135deg,#0f0f1a 0%,#1a0f1f 100%);display:none;flex-direction:column;align-items:center;justify-content:flex-start;z-index:110;padding:40px 20px;overflow-y:auto;overflow-x:hidden;scroll-behavior:smooth}
+#mpMenu,#mpLobby{position:fixed;inset:0;background:linear-gradient(135deg,#0a141a 0%,#0f1a14 100%);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:115;padding:40px 20px}
+#mpMenu.active,#mpLobby.active{display:flex}
+#mpMenu h1,#mpLobby h1{font-size:54px;letter-spacing:14px;color:#10b981;text-shadow:0 0 20px rgba(16,185,129,.5);margin-bottom:6px}
+#mpMenu .sub,#mpLobby .sub{font-size:12px;letter-spacing:6px;color:#888;margin-bottom:30px}
+.mpPanel{background:rgba(20,30,28,.85);border:1px solid #10b981;padding:30px 40px;min-width:400px;display:flex;flex-direction:column;gap:14px}
+.mpPanel .row{display:flex;flex-direction:column;gap:6px}
+.mpPanel label{font-size:11px;letter-spacing:3px;color:#888}
+.mpPanel input{background:#0a0a0a;color:#10b981;border:1px solid #444;padding:12px;font-size:16px;font-family:inherit;outline:none}
+.mpPanel input:focus{border-color:#10b981;box-shadow:0 0 8px rgba(16,185,129,.3)}
+.mpPanel button{background:#10b981;color:#000;border:none;padding:12px 20px;font-size:13px;font-weight:900;letter-spacing:3px;cursor:pointer;font-family:inherit;transition:all .15s}
+.mpPanel button:hover{background:#34d399;transform:translateY(-1px)}
+.mpPanel button.big{padding:16px 24px;font-size:14px;letter-spacing:4px}
+.mpPanel .divider{text-align:center;color:#444;font-size:11px;letter-spacing:6px;margin:6px 0}
+.mpStatus{min-height:18px;text-align:center;font-size:12px;color:#fbbf24;letter-spacing:2px}
+.mpStatus.error{color:#ff4655}
+.mpCode{font-size:54px;letter-spacing:18px;color:#10b981;font-weight:900;text-shadow:0 0 14px rgba(16,185,129,.6);margin:10px 0;padding:14px 28px;border:2px dashed #10b981;background:rgba(16,185,129,.06)}
+.copyBtn{background:#10b981;color:#000;border:none;padding:8px 16px;font-size:11px;font-weight:900;letter-spacing:3px;cursor:pointer;margin-bottom:24px;font-family:inherit}
+.copyBtn:hover{background:#34d399}
+#mpPlayerList{display:flex;flex-direction:column;gap:6px;min-width:300px}
+.mpPlayerRow{display:flex;justify-content:space-between;align-items:center;background:#0a0a0a;border:1px solid #1a3a2a;padding:10px 14px;font-size:13px;color:#fff}
+.mpPlayerRow .crown{color:#fbbf24;margin-right:6px}
+.mpPlayerRow .you{color:#10b981;font-weight:900;font-size:10px;letter-spacing:2px}
+#mpStartBtn:disabled{background:#444;color:#888;cursor:not-allowed}
+#mpStartBtn:disabled:hover{background:#444;transform:none}
+#mpHud{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);border:1px solid #10b981;padding:6px 14px;color:#10b981;font-size:11px;letter-spacing:3px;font-weight:900;z-index:50;display:none}
+#mpHud.active{display:block}
+.mpNameTag{position:absolute;color:#fff;background:rgba(0,0,0,.7);padding:2px 6px;font-size:11px;font-weight:900;letter-spacing:1px;border:1px solid #10b981;pointer-events:none;transform:translate(-50%,-100%);white-space:nowrap}
 #gunSelect.active{display:flex}
 #gunSelect::-webkit-scrollbar{width:10px}
 #gunSelect::-webkit-scrollbar-track{background:rgba(0,0,0,.3)}
@@ -142,14 +169,58 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
   <h2>TACTICAL FPS</h2>
   <div class="panel">
     <h3>// MISSION BRIEFING</h3>
-    <button onclick="openGunSelect()">SELECT WEAPON</button>
+    <button onclick="openGunSelect()">SOLO vs AI</button>
+    <button onclick="openMultiplayer()" style="background:#10b981;color:#000;margin-top:10px">MULTIPLAYER PARTY</button>
     <div class="tutorial">
       <div><span>WASD</span> 이동 · <span>SPACE</span> 점프</div>
-      <div><span>LMB</span> 발사 · <span>R</span> 장전</div>
+      <div><span>LMB</span> 발사 · <span>RMB</span> 조준 · <span>R</span> 장전</div>
       <div><span>SHIFT</span> 달리기 · <span>ESC</span> 일시정지</div>
       <div style="margin-top:12px;color:#ff4655">관통 시스템:</div>
       <div><span style="color:#fbbf24">얇은벽</span> -50% · <span style="color:#fbbf24">중간벽</span> -30% · <span style="color:#fbbf24">두꺼운벽</span> -15%</div>
       <div>데미지는 아머 <span>66%</span> / 체력 <span>34%</span> 분배</div>
+    </div>
+  </div>
+</div>
+
+<div id="mpMenu">
+  <h1>PARTY</h1>
+  <div class="sub">// MULTIPLAYER LOBBY</div>
+  <div class="mpPanel">
+    <div class="row">
+      <label>NICKNAME</label>
+      <input id="mpName" maxlength="16" placeholder="PLAYER">
+    </div>
+    <div class="row">
+      <button class="big" onclick="mpCreateRoom()">CREATE PARTY</button>
+    </div>
+    <div class="divider">— OR —</div>
+    <div class="row">
+      <label>CODE</label>
+      <input id="mpJoinCode" maxlength="4" placeholder="XXXX" style="text-transform:uppercase;letter-spacing:6px;font-weight:900;text-align:center">
+    </div>
+    <div class="row">
+      <button class="big" onclick="mpJoinRoom()">JOIN PARTY</button>
+    </div>
+    <div id="mpStatus" class="mpStatus"></div>
+    <div class="row">
+      <button onclick="backToMenu()" style="background:#444">BACK</button>
+    </div>
+  </div>
+</div>
+
+<div id="mpLobby">
+  <h1>LOBBY</h1>
+  <div class="sub">// PARTY CODE</div>
+  <div class="mpCode" id="mpRoomCode">----</div>
+  <button class="copyBtn" onclick="mpCopyCode()">📋 COPY CODE</button>
+  <div class="mpPanel">
+    <div style="font-size:12px;color:#888;letter-spacing:3px;margin-bottom:10px">PLAYERS</div>
+    <div id="mpPlayerList"></div>
+    <div class="row" style="margin-top:20px">
+      <button class="big" id="mpStartBtn" onclick="mpStartParty()">DEPLOY → SELECT WEAPON</button>
+    </div>
+    <div class="row">
+      <button onclick="mpLeaveRoom()" style="background:#444">LEAVE PARTY</button>
     </div>
   </div>
 </div>
@@ -191,6 +262,8 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
   </div>
   <div id="reloadIndicator"><div class="bar"><div class="fill"></div></div><div class="lbl">RELOADING</div></div>
   <div id="controlsHint">[LMB] FIRE  [RMB] AIM  [R] RELOAD  [SHIFT] SPRINT  [SPACE] JUMP</div>
+  <div id="mpHud">PARTY <span id="mpHudCode">----</span> · <span id="mpHudCount">1</span> PLAYERS</div>
+  <div id="mpNameTags"></div>
 </div>
 
 <div id="damageNumbers"></div>
@@ -628,7 +701,348 @@ function openGunSelect() {
 }
 function backToMenu() {
   document.getElementById('gunSelect').classList.remove('active');
+  document.getElementById('mpMenu').classList.remove('active');
+  document.getElementById('mpLobby').classList.remove('active');
   document.getElementById('menu').style.display = 'flex';
+}
+
+// ══════════════════════════════════════════════════════
+//   MULTIPLAYER CLIENT
+// ══════════════════════════════════════════════════════
+// Auto-detect server URL: localhost when running locally, otherwise use deployed.
+// 👉 After deploying penfps-server to Render/Railway, paste your wss:// URL here.
+const MP_SERVER_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? 'ws://localhost:3001'
+  : 'wss://penfps-server.onrender.com';   // <-- replace with your deployed URL
+
+const mp = {
+  ws: null,
+  connected: false,
+  roomCode: null,
+  playerId: null,
+  myName: 'PLAYER',
+  isHost: false,
+  active: false,            // true while in MP match
+  players: new Map(),       // playerId -> { name, weaponKey, mesh, nameTagEl, pos, yaw, pitch, health, lastSeen }
+  lastSendTime: 0,
+};
+
+function mpStatus(text, isError) {
+  const el = document.getElementById('mpStatus');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('error', !!isError);
+}
+
+function openMultiplayer() {
+  document.getElementById('menu').style.display = 'none';
+  document.getElementById('mpMenu').classList.add('active');
+  const stored = localStorage.getItem('penfps_name');
+  if (stored) document.getElementById('mpName').value = stored;
+  mpStatus('');
+}
+
+function mpConnect(onOpen) {
+  if (mp.ws && mp.ws.readyState === 1) { onOpen(); return; }
+  try {
+    mpStatus('CONNECTING…');
+    mp.ws = new WebSocket(MP_SERVER_URL);
+  } catch (err) {
+    mpStatus('CONNECTION FAILED — IS THE SERVER RUNNING?', true);
+    return;
+  }
+  mp.ws.onopen = () => { mp.connected = true; mpStatus(''); onOpen(); };
+  mp.ws.onclose = () => { mp.connected = false; if (mp.active) mpHandleDisconnect(); };
+  mp.ws.onerror = () => { mpStatus('SERVER UNREACHABLE — START penfps-server LOCALLY OR DEPLOY IT', true); };
+  mp.ws.onmessage = (ev) => {
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+    mpHandleMessage(msg);
+  };
+}
+
+function mpSend(msg) {
+  if (mp.ws && mp.ws.readyState === 1) mp.ws.send(JSON.stringify(msg));
+}
+
+function mpCreateRoom() {
+  const name = (document.getElementById('mpName').value || 'PLAYER').slice(0, 16);
+  mp.myName = name;
+  localStorage.setItem('penfps_name', name);
+  mpConnect(() => mpSend({ type: 'create_room', name }));
+}
+
+function mpJoinRoom() {
+  const name = (document.getElementById('mpName').value || 'PLAYER').slice(0, 16);
+  const code = (document.getElementById('mpJoinCode').value || '').toUpperCase().trim();
+  if (code.length !== 4) { mpStatus('CODE MUST BE 4 CHARACTERS', true); return; }
+  mp.myName = name;
+  localStorage.setItem('penfps_name', name);
+  mpConnect(() => mpSend({ type: 'join_room', code, name }));
+}
+
+function mpLeaveRoom() {
+  if (mp.ws) { try { mp.ws.close(); } catch{} }
+  mp.ws = null; mp.connected = false; mp.roomCode = null; mp.playerId = null;
+  mp.isHost = false; mp.active = false;
+  mp.players.forEach(p => { if (p.mesh) scene.remove(p.mesh); if (p.nameTagEl) p.nameTagEl.remove(); });
+  mp.players.clear();
+  document.getElementById('mpLobby').classList.remove('active');
+  document.getElementById('mpHud').classList.remove('active');
+  backToMenu();
+}
+
+function mpCopyCode() {
+  if (!mp.roomCode) return;
+  navigator.clipboard.writeText(mp.roomCode);
+  const btn = event.target;
+  const old = btn.textContent;
+  btn.textContent = '✓ COPIED';
+  setTimeout(() => btn.textContent = old, 1500);
+}
+
+function mpRenderLobby() {
+  document.getElementById('mpRoomCode').textContent = mp.roomCode || '----';
+  const list = document.getElementById('mpPlayerList');
+  list.innerHTML = '';
+  // Build a roster including me
+  const all = [];
+  if (mp.playerId) all.push({ playerId: mp.playerId, name: mp.myName, isHost: mp.isHost, isMe: true });
+  mp.players.forEach(p => all.push({ playerId: p.playerId, name: p.name, isHost: p.isHost, isMe: false }));
+  for (const p of all) {
+    const row = document.createElement('div');
+    row.className = 'mpPlayerRow';
+    row.innerHTML = `<span>${p.isHost?'<span class="crown">★</span>':''}${p.name}</span>${p.isMe?'<span class="you">YOU</span>':''}`;
+    list.appendChild(row);
+  }
+  // Only host can deploy
+  const startBtn = document.getElementById('mpStartBtn');
+  startBtn.disabled = !mp.isHost;
+  startBtn.textContent = mp.isHost ? 'DEPLOY → SELECT WEAPON' : 'WAITING FOR HOST…';
+}
+
+function mpStartParty() {
+  if (!mp.isHost) return;
+  mpSend({ type: 'start_game' });
+  // Host immediately moves to weapon select
+  mpEnterWeaponSelect();
+}
+
+function mpEnterWeaponSelect() {
+  document.getElementById('mpLobby').classList.remove('active');
+  document.getElementById('gunSelect').classList.add('active');
+  mp.active = true;
+}
+
+function mpHandleMessage(msg) {
+  switch (msg.type) {
+    case 'room_created': {
+      mp.roomCode = msg.code;
+      mp.playerId = msg.playerId;
+      mp.isHost = true;
+      document.getElementById('mpMenu').classList.remove('active');
+      document.getElementById('mpLobby').classList.add('active');
+      mpRenderLobby();
+      break;
+    }
+    case 'room_joined': {
+      mp.roomCode = msg.code;
+      mp.playerId = msg.playerId;
+      mp.isHost = false;
+      // Add existing players (excluding me)
+      for (const p of msg.players) {
+        if (p.playerId === mp.playerId) continue;
+        mp.players.set(p.playerId, { ...p, pos: new THREE.Vector3(), yaw:0, pitch:0, health:100 });
+      }
+      document.getElementById('mpMenu').classList.remove('active');
+      document.getElementById('mpLobby').classList.add('active');
+      mpRenderLobby();
+      break;
+    }
+    case 'player_joined': {
+      const p = msg.player;
+      mp.players.set(p.playerId, { ...p, pos: new THREE.Vector3(), yaw:0, pitch:0, health:100 });
+      mpRenderLobby();
+      break;
+    }
+    case 'player_left': {
+      const p = mp.players.get(msg.playerId);
+      if (p) {
+        if (p.mesh) scene.remove(p.mesh);
+        if (p.nameTagEl) p.nameTagEl.remove();
+        mp.players.delete(msg.playerId);
+      }
+      if (msg.newHostId === mp.playerId) mp.isHost = true;
+      mpRenderLobby();
+      break;
+    }
+    case 'start_game': {
+      // Non-host clients: jump straight to weapon select
+      if (!mp.isHost) mpEnterWeaponSelect();
+      break;
+    }
+    case 'player_weapon': {
+      const p = mp.players.get(msg.playerId);
+      if (p) p.weaponKey = msg.weaponKey;
+      break;
+    }
+    case 'player_state': {
+      let p = mp.players.get(msg.playerId);
+      if (!p) {
+        p = { playerId: msg.playerId, name: 'P?', isHost:false, pos: new THREE.Vector3(), yaw:0, pitch:0, health:100 };
+        mp.players.set(msg.playerId, p);
+      }
+      p.pos.set(msg.x, msg.y, msg.z);
+      p.yaw = msg.yaw; p.pitch = msg.pitch;
+      p.health = msg.health;
+      p.lastSeen = performance.now();
+      // Spawn mesh on first sight
+      if (!p.mesh) mpSpawnRemotePlayer(p);
+      break;
+    }
+    case 'shoot': {
+      const p = mp.players.get(msg.playerId);
+      if (!p) break;
+      mpVisualizeRemoteShot(msg, p);
+      break;
+    }
+    case 'hit': {
+      // Someone hit me?
+      if (msg.targetId === mp.playerId) {
+        const pTarget = { armor: player.armor, health: player.health };
+        const dmg = msg.damage || 20;
+        const r = calculateDamage(dmg, msg.wallType || null, pTarget);
+        player.armor = pTarget.armor;
+        player.health = pTarget.health;
+        document.getElementById('hud').style.boxShadow = 'inset 0 0 60px rgba(255,0,0,0.5)';
+        setTimeout(()=>{ document.getElementById('hud').style.boxShadow = 'none'; }, 200);
+        updateHUD();
+        if (player.health <= 0) {
+          mpSend({ type: 'kill', killerId: msg.playerId });
+          mpRespawn();
+        }
+      }
+      break;
+    }
+    case 'kill': {
+      // someone died — could update scoreboard later
+      break;
+    }
+    case 'respawn': {
+      const p = mp.players.get(msg.playerId);
+      if (p) { p.health = 100; if (p.mesh) p.mesh.visible = true; }
+      break;
+    }
+    case 'error': {
+      mpStatus('ERROR: ' + msg.message.toUpperCase(), true);
+      break;
+    }
+  }
+}
+
+function mpHandleDisconnect() {
+  mp.active = false;
+  mp.players.forEach(p => { if (p.mesh) scene.remove(p.mesh); if (p.nameTagEl) p.nameTagEl.remove(); });
+  mp.players.clear();
+  alert('서버 연결이 끊어졌습니다');
+  location.reload();
+}
+
+function mpSpawnRemotePlayer(p) {
+  const g = new THREE.Group();
+  // Body
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff4655, roughness:0.7 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 1.2, 10), bodyMat);
+  body.position.y = 0.6;
+  g.add(body);
+  // Head
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), new THREE.MeshStandardMaterial({ color:0xffdab5 }));
+  head.position.y = 1.45;
+  g.add(head);
+  // Forward indicator (small box on chest pointing forward)
+  const fwd = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.08, 0.4), new THREE.MeshStandardMaterial({ color:0x10b981 }));
+  fwd.position.set(0, 0.85, -0.35);
+  g.add(fwd);
+  scene.add(g);
+  p.mesh = g;
+  // Name tag (DOM)
+  const tag = document.createElement('div');
+  tag.className = 'mpNameTag';
+  tag.textContent = p.name || p.playerId;
+  document.getElementById('mpNameTags').appendChild(tag);
+  p.nameTagEl = tag;
+}
+
+function mpVisualizeRemoteShot(msg, p) {
+  // Tracer
+  const start = new THREE.Vector3(msg.ox, msg.oy, msg.oz);
+  const end = new THREE.Vector3(msg.ex, msg.ey, msg.ez);
+  const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
+  const mat = new THREE.LineBasicMaterial({ color: 0xfbbf24, transparent:true, opacity:0.9 });
+  const line = new THREE.Line(geo, mat);
+  scene.add(line);
+  let life = 80;
+  const id = setInterval(() => {
+    life -= 16; mat.opacity = Math.max(0, life/80);
+    if (life <= 0) { clearInterval(id); scene.remove(line); geo.dispose(); mat.dispose(); }
+  }, 16);
+}
+
+function mpRespawn() {
+  player.health = 100; player.armor = 50;
+  player.pos.set((Math.random()-0.5)*30, 1.7, (Math.random()-0.5)*30);
+  mpSend({ type: 'respawn' });
+  updateHUD();
+}
+
+function mpSendState() {
+  const now = performance.now();
+  if (now - mp.lastSendTime < 50) return; // ~20 Hz
+  mp.lastSendTime = now;
+  mpSend({
+    type: 'player_state',
+    x: player.pos.x, y: player.pos.y, z: player.pos.z,
+    yaw: player.yaw, pitch: player.pitch,
+    health: player.health,
+    weaponKey: selectedWeaponKey,
+  });
+}
+
+function mpUpdateRemotePlayers() {
+  const now = performance.now();
+  mp.players.forEach((p) => {
+    if (!p.mesh) return;
+    // Smooth lerp toward latest pos
+    p.mesh.position.x += (p.pos.x - p.mesh.position.x) * 0.3;
+    p.mesh.position.y += ((p.pos.y - 1.7) - p.mesh.position.y) * 0.3;
+    p.mesh.position.z += (p.pos.z - p.mesh.position.z) * 0.3;
+    p.mesh.rotation.y = p.yaw;
+    // Hide if stale (>3 s)
+    p.mesh.visible = (now - (p.lastSeen||0)) < 3000 && (p.health > 0);
+    // Position name tag in screen space
+    if (p.nameTagEl) {
+      const headPos = p.mesh.position.clone(); headPos.y += 1.9;
+      const screen = headPos.project(camera);
+      const inFront = screen.z < 1;
+      if (inFront && p.mesh.visible) {
+        const sx = (screen.x * 0.5 + 0.5) * window.innerWidth;
+        const sy = (-screen.y * 0.5 + 0.5) * window.innerHeight;
+        p.nameTagEl.style.display = 'block';
+        p.nameTagEl.style.left = sx + 'px';
+        p.nameTagEl.style.top = sy + 'px';
+      } else {
+        p.nameTagEl.style.display = 'none';
+      }
+    }
+  });
+  // HUD party count
+  const hud = document.getElementById('mpHud');
+  if (mp.active) {
+    hud.classList.add('active');
+    document.getElementById('mpHudCode').textContent = mp.roomCode || '----';
+    document.getElementById('mpHudCount').textContent = (mp.players.size + 1);
+  } else {
+    hud.classList.remove('active');
+  }
 }
 function populateGunGrid() {
   const grid = document.getElementById('gunGrid');
@@ -702,14 +1116,22 @@ function teleportToMap(key) {
   player.kills = 0;
   document.getElementById('killCount').textContent = '0';
 
-  // Revive any dead enemies / respawn fresh squad
+  // Revive any dead enemies
   for (const e of [...enemies]) {
     scene.remove(e.group);
   }
   enemies.length = 0;
-  for (let i=0; i<6; i++) {
-    const angle = (i/6) * Math.PI * 2;
-    createEnemy(Math.cos(angle)*15, Math.sin(angle)*15 - 5);
+  // Spawn AI enemies only in solo mode (multiplayer = humans only)
+  if (!mp.active) {
+    for (let i=0; i<6; i++) {
+      const angle = (i/6) * Math.PI * 2;
+      createEnemy(Math.cos(angle)*15, Math.sin(angle)*15 - 5);
+    }
+  } else {
+    // Notify others of our chosen weapon
+    mpSend({ type: 'set_weapon', weaponKey: key });
+    // Spread spawn positions in MP so players don't overlap
+    player.pos.set((Math.random()-0.5)*20, 1.7, (Math.random()-0.5)*20 + 5);
   }
 
   equipGun(key);
@@ -867,7 +1289,43 @@ function shoot() {
   dir.y += (Math.random()-0.5) * currentWeapon.spread * spreadMul;
   dir.normalize();
 
+  // Multiplayer: check hits on remote players first, then walls/AI
+  if (mp.active) mpRaycastPlayers(origin, dir, currentWeapon.damage);
   traceShot(origin, dir, currentWeapon.damage, RANGE);
+
+  // Broadcast shot for visual tracer
+  if (mp.active) {
+    const end = origin.clone().add(dir.clone().multiplyScalar(RANGE));
+    mpSend({
+      type: 'shoot',
+      ox: origin.x, oy: origin.y, oz: origin.z,
+      ex: end.x,    ey: end.y,    ez: end.z,
+      weaponKey: selectedWeaponKey,
+    });
+  }
+}
+
+// Check if our shot hits any remote player; report hit to server
+function mpRaycastPlayers(origin, dir, damage) {
+  const meshes = [];
+  mp.players.forEach(p => { if (p.mesh && p.mesh.visible) meshes.push(...p.mesh.children.map(c => { c.userData._owner = p; return c; })); });
+  if (meshes.length === 0) return;
+  const rc = new THREE.Raycaster(origin, dir, 0, RANGE);
+  const hits = rc.intersectObjects(meshes, false);
+  if (hits.length === 0) return;
+  // Check if a wall blocks first
+  const wallRC = new THREE.Raycaster(origin, dir, 0, hits[0].distance);
+  const wallHits = wallRC.intersectObjects(walls.map(w=>w.mesh).filter(m=>m.userData.penType==='Solid'), false);
+  if (wallHits.length > 0) return;
+  const hit = hits[0];
+  const target = hit.object.userData._owner;
+  if (!target) return;
+  // Headshot if hit upper sphere area
+  const isHead = hit.point.y > target.mesh.position.y + 1.3;
+  const finalDmg = damage * (isHead ? 2.5 : 1.0);
+  showDamageNumber(hit.point, finalDmg * 0.66, finalDmg * 0.34, isHead);
+  showHitMarker();
+  mpSend({ type: 'hit', targetId: target.playerId, damage: finalDmg, isHead });
 }
 
 function traceShot(origin, dir, damage, remainingRange) {
@@ -1246,7 +1704,13 @@ function update(dt) {
   // Shoot
   if (mouseDown) shoot();
 
-  // Enemies
+  // Multiplayer sync
+  if (mp.active) {
+    mpSendState();
+    mpUpdateRemotePlayers();
+  }
+
+  // Enemies (AI only - skipped in multiplayer)
   for (const e of enemies) {
     if (e.dead) continue;
 
