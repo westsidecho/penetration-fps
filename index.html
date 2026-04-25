@@ -512,24 +512,32 @@ function equipGun(key) {
                 'rawSize=', size.toArray().map(v=>v.toFixed(2)),
                 'maxDim=', maxDim.toFixed(2), 'scale=', scale.toFixed(4));
 
-    // Orient barrel along -Z (camera forward).
-    // Longest axis is the barrel direction in original model space.
-    const gunWrap = new THREE.Group();
-    gunWrap.add(flat);
-    gunWrap.scale.setScalar(scale);
+    // Orient gun: TWO-STAGE so we can roll on model axis BEFORE yawing forward.
+    // GLB pack puts the gun's "up" (scope/sight) on local +Z, not +Y.
+    // Stage 1 (innerRoll): roll around the barrel axis so model's +Z -> world +Y.
+    // Stage 2 (outerYaw): rotate so the barrel axis points forward (-Z).
+    const innerRoll = new THREE.Group();
+    innerRoll.add(flat);
+
+    const outerYaw = new THREE.Group();
+    outerYaw.add(innerRoll);
+    outerYaw.scale.setScalar(scale);
 
     if (size.x >= size.y && size.x >= size.z) {
-      // X is longest -> barrel along +X. Rotate around Y by +90deg so +X -> -Z.
-      gunWrap.rotation.y = Math.PI / 2;
+      // Barrel along model +X. Roll around X to bring +Z up, then yaw +X -> -Z.
+      innerRoll.rotation.x = -Math.PI / 2;
+      outerYaw.rotation.y =  Math.PI / 2;
     } else if (size.z >= size.x && size.z >= size.y) {
-      // Z is longest -> barrel along +Z. Flip 180 so +Z -> -Z.
-      gunWrap.rotation.y = Math.PI;
+      // Barrel along model +Z. Just face it forward; if scope is sideways, roll.
+      innerRoll.rotation.z = -Math.PI / 2;
+      outerYaw.rotation.y =  Math.PI;
     } else {
-      // Y is longest -> barrel along +Y. Tilt forward so +Y -> -Z.
-      gunWrap.rotation.x = Math.PI / 2;
+      // Barrel along model +Y.
+      innerRoll.rotation.y = -Math.PI / 2;
+      outerYaw.rotation.x =  Math.PI / 2;
     }
 
-    gun.add(gunWrap);
+    gun.add(outerYaw);
   } else {
     // Fallback simple rifle shape
     const body = new THREE.Mesh(
