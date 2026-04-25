@@ -5,6 +5,7 @@
 <title>Penetration FPS</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI','Noto Sans KR',sans-serif}
 html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user-select:none}
@@ -709,21 +710,22 @@ function backToMenu() {
 // ══════════════════════════════════════════════════════
 //   MULTIPLAYER CLIENT
 // ══════════════════════════════════════════════════════
-// Auto-detect server URL: localhost when running locally, otherwise use deployed.
-// 👉 After deploying penfps-server to Render/Railway, paste your wss:// URL here.
-const MP_SERVER_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-  ? 'ws://localhost:3001'
-  : 'wss://penfps-server.onrender.com';   // <-- replace with your deployed URL
+// SERVERLESS P2P via PeerJS: uses public PeerJS cloud broker for signaling, then
+// connects players directly via WebRTC. No server deployment needed.
+// Star topology: HOST receives all client messages and relays to other clients.
+
+const PEER_PREFIX = 'penfps-2026-';   // namespace so only our game players collide
 
 const mp = {
-  ws: null,
-  connected: false,
-  roomCode: null,
-  playerId: null,
-  myName: 'PLAYER',
+  peer: null,                // PeerJS Peer instance
+  conns: new Map(),          // peerId -> DataConnection (host: all clients; client: just host)
+  hostConn: null,            // for client: the host connection
   isHost: false,
-  active: false,            // true while in MP match
-  players: new Map(),       // playerId -> { name, weaponKey, mesh, nameTagEl, pos, yaw, pitch, health, lastSeen }
+  roomCode: null,
+  playerId: null,            // peer.id
+  myName: 'PLAYER',
+  active: false,
+  players: new Map(),        // remote players
   lastSendTime: 0,
 };
 
@@ -742,33 +744,103 @@ function openMultiplayer() {
   mpStatus('');
 }
 
-function mpConnect(onOpen) {
-  if (mp.ws && mp.ws.readyState === 1) { onOpen(); return; }
-  try {
-    mpStatus('CONNECTING…');
-    mp.ws = new WebSocket(MP_SERVER_URL);
-  } catch (err) {
-    mpStatus('CONNECTION FAILED — IS THE SERVER RUNNING?', true);
-    return;
-  }
-  mp.ws.onopen = () => { mp.connected = true; mpStatus(''); onOpen(); };
-  mp.ws.onclose = () => { mp.connected = false; if (mp.active) mpHandleDisconnect(); };
-  mp.ws.onerror = () => { mpStatus('SERVER UNREACHABLE — START penfps-server LOCALLY OR DEPLOY IT', true); };
-  mp.ws.onmessage = (ev) => {
-    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
-    mpHandleMessage(msg);
-  };
-}
-
-function mpSend(msg) {
-  if (mp.ws && mp.ws.readyState === 1) mp.ws.send(JSON.stringify(msg));
+function generateRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
 }
 
 function mpCreateRoom() {
   const name = (document.getElementById('mpName').value || 'PLAYER').slice(0, 16);
   mp.myName = name;
   localStorage.setItem('penfps_name', name);
-  mpConnect(() => mpSend({ type: 'create_room', name }));
+  mp.isHost = true;
+  mp.roomCode = generateRoomCode();
+  const peerId = PEER_PREFIX + mp.roomCode + '-host';
+  mpStatus('CREATING PARTY…');
+
+  if (typeof Peer === 'undefined') { mpStatus('PEERJS LIBRARY FAILED TO LOAD', true); return; }
+
+  mp.peer = new Peer(peerId, { debug: 1 });
+  mp.peer.on('open', (id) => {
+    mp.playerId = id;
+    document.getElementById('mpMenu').classList.remove('active');
+    document.getElementById('mpLobby').classList.add('active');
+    mpStatus('');
+    mpRenderLobby();
+  });
+  mp.peer.on('error', (err) => {
+    if (err.type === 'unavailable-id') {
+      // Code collision — pick a new one
+      try { mp.peer.destroy(); } catch{}
+      mp.peer = null;
+      mp.roomCode = null;
+      mpCreateRoom();
+    } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
+      mpStatus('PEERJS CLOUD UNREACHABLE — CHECK INTERNET', true);
+    } else {
+      mpStatus('ERROR: ' + err.type.toUpperCase(), true);
+    }
+  });
+  // Incoming client connections
+  mp.peer.on('connection', (conn) => {
+    conn.on('open', () => {
+      mp.conns.set(conn.peer, conn);
+      const remoteName = (conn.metadata && conn.metadata.name) || 'PLAYER';
+      // Track in players map
+      mp.players.set(conn.peer, {
+        playerId: conn.peer, name: remoteName, isHost: false,
+        pos: new THREE.Vector3(), yaw: 0, pitch: 0, health: 100,
+      });
+      // Send welcome with current roster to the new joiner
+      conn.send({
+        type: 'welcome',
+        playerId: conn.peer,
+        roster: mpRoster(),
+      });
+      // Notify other clients
+      mpBroadcastFromHost({
+        type: 'player_joined',
+        player: { playerId: conn.peer, name: remoteName, isHost: false },
+      }, conn.peer);
+      mpRenderLobby();
+    });
+    conn.on('data', (msg) => mpHostReceive(conn, msg));
+    conn.on('close', () => mpHostHandleClientLeave(conn));
+    conn.on('error', () => mpHostHandleClientLeave(conn));
+  });
+}
+
+function mpRoster() {
+  const arr = [{ playerId: mp.playerId, name: mp.myName, isHost: true }];
+  mp.players.forEach(p => arr.push({ playerId: p.playerId, name: p.name, isHost: !!p.isHost }));
+  return arr;
+}
+
+function mpHostHandleClientLeave(conn) {
+  if (!mp.conns.has(conn.peer)) return;
+  mp.conns.delete(conn.peer);
+  const p = mp.players.get(conn.peer);
+  if (p) { if (p.mesh) scene.remove(p.mesh); if (p.nameTagEl) p.nameTagEl.remove(); }
+  mp.players.delete(conn.peer);
+  mpBroadcastFromHost({ type: 'player_left', playerId: conn.peer });
+  mpRenderLobby();
+}
+
+function mpHostReceive(conn, msg) {
+  // Tag with sender ID and broadcast to everyone except the sender
+  msg.playerId = conn.peer;
+  mpBroadcastFromHost(msg, conn.peer);
+  // Process locally too (host is also a player)
+  mpHandleMessage(msg);
+}
+
+function mpBroadcastFromHost(msg, excludeId) {
+  for (const [id, conn] of mp.conns) {
+    if (id === excludeId) continue;
+    if (conn.open) { try { conn.send(msg); } catch {} }
+  }
 }
 
 function mpJoinRoom() {
@@ -777,18 +849,67 @@ function mpJoinRoom() {
   if (code.length !== 4) { mpStatus('CODE MUST BE 4 CHARACTERS', true); return; }
   mp.myName = name;
   localStorage.setItem('penfps_name', name);
-  mpConnect(() => mpSend({ type: 'join_room', code, name }));
+  mp.isHost = false;
+  mp.roomCode = code;
+
+  if (typeof Peer === 'undefined') { mpStatus('PEERJS LIBRARY FAILED TO LOAD', true); return; }
+
+  mpStatus('CONNECTING…');
+  const myId = PEER_PREFIX + code + '-c-' + Math.random().toString(36).slice(2, 10);
+  mp.peer = new Peer(myId, { debug: 1 });
+  mp.peer.on('open', (id) => {
+    mp.playerId = id;
+    const hostId = PEER_PREFIX + code + '-host';
+    const conn = mp.peer.connect(hostId, { metadata: { name }, reliable: false });
+    mp.hostConn = conn;
+    let opened = false;
+    conn.on('open', () => {
+      opened = true;
+      mp.conns.set(hostId, conn);
+      mpStatus('CONNECTED');
+    });
+    conn.on('data', (msg) => mpHandleMessage(msg));
+    conn.on('error', () => mpStatus('CONNECTION ERROR', true));
+    conn.on('close', () => { if (mp.active) mpHandleDisconnect(); });
+    setTimeout(() => {
+      if (!opened) mpStatus('ROOM "' + code + '" NOT FOUND OR HOST LEFT', true);
+    }, 6000);
+  });
+  mp.peer.on('error', (err) => {
+    if (err.type === 'peer-unavailable') {
+      mpStatus('ROOM "' + code + '" NOT FOUND', true);
+    } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
+      mpStatus('PEERJS CLOUD UNREACHABLE — CHECK INTERNET', true);
+    } else {
+      mpStatus('ERROR: ' + err.type.toUpperCase(), true);
+    }
+  });
 }
 
 function mpLeaveRoom() {
-  if (mp.ws) { try { mp.ws.close(); } catch{} }
-  mp.ws = null; mp.connected = false; mp.roomCode = null; mp.playerId = null;
-  mp.isHost = false; mp.active = false;
+  try { if (mp.peer) mp.peer.destroy(); } catch{}
+  mp.peer = null;
+  mp.conns.clear();
+  mp.hostConn = null;
+  mp.roomCode = null;
+  mp.playerId = null;
+  mp.isHost = false;
+  mp.active = false;
   mp.players.forEach(p => { if (p.mesh) scene.remove(p.mesh); if (p.nameTagEl) p.nameTagEl.remove(); });
   mp.players.clear();
   document.getElementById('mpLobby').classList.remove('active');
   document.getElementById('mpHud').classList.remove('active');
   backToMenu();
+}
+
+// Outbound message: host broadcasts to all clients; client sends to host (host re-broadcasts)
+function mpSend(msg) {
+  if (mp.isHost) {
+    msg.playerId = mp.playerId;
+    mpBroadcastFromHost(msg);
+  } else {
+    if (mp.hostConn && mp.hostConn.open) { try { mp.hostConn.send(msg); } catch {} }
+  }
 }
 
 function mpCopyCode() {
@@ -835,21 +956,11 @@ function mpEnterWeaponSelect() {
 
 function mpHandleMessage(msg) {
   switch (msg.type) {
-    case 'room_created': {
-      mp.roomCode = msg.code;
-      mp.playerId = msg.playerId;
-      mp.isHost = true;
-      document.getElementById('mpMenu').classList.remove('active');
-      document.getElementById('mpLobby').classList.add('active');
-      mpRenderLobby();
-      break;
-    }
-    case 'room_joined': {
-      mp.roomCode = msg.code;
-      mp.playerId = msg.playerId;
-      mp.isHost = false;
-      // Add existing players (excluding me)
-      for (const p of msg.players) {
+    case 'welcome': {
+      // Sent by host to a newly connected client
+      mp.playerId = msg.playerId;     // host echoes back our peer id
+      // Build players map from roster (skip self)
+      for (const p of (msg.roster || [])) {
         if (p.playerId === mp.playerId) continue;
         mp.players.set(p.playerId, { ...p, pos: new THREE.Vector3(), yaw:0, pitch:0, health:100 });
       }
@@ -860,6 +971,7 @@ function mpHandleMessage(msg) {
     }
     case 'player_joined': {
       const p = msg.player;
+      if (p.playerId === mp.playerId) break;
       mp.players.set(p.playerId, { ...p, pos: new THREE.Vector3(), yaw:0, pitch:0, health:100 });
       mpRenderLobby();
       break;
@@ -871,7 +983,6 @@ function mpHandleMessage(msg) {
         if (p.nameTagEl) p.nameTagEl.remove();
         mp.players.delete(msg.playerId);
       }
-      if (msg.newHostId === mp.playerId) mp.isHost = true;
       mpRenderLobby();
       break;
     }
