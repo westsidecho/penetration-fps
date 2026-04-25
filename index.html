@@ -147,7 +147,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
   <div id="gunGrid"></div>
   <div class="footer">
     <button onclick="backToMenu()">BACK</button>
-    <div style="color:#888;font-size:11px;letter-spacing:2px;padding:14px 0;">▸ CLICK ANY UNLOCKED WEAPON TO TELEPORT INTO BATTLE</div>
+    <div style="color:#10b981;font-size:11px;letter-spacing:2px;padding:14px 0;">▸ ALL WEAPONS FREE — CLICK ANY GUN TO TELEPORT INTO BATTLE</div>
   </div>
   <div id="loadingMsg">LOADING ARSENAL...</div>
 </div>
@@ -388,16 +388,13 @@ const WEAPONS = {
 const WEAPON_ORDER = ['BE2','BE4','BE1','BE3','BE5','MG1','MG2','MG4','MG3','MG5','MSR','SNIPER1','GL1','RPG'];
 
 // ── Coin / unlock system ──
-const UNLOCK_COST = 300;
+const UNLOCK_COST = 0;          // ALL FREE
 const COIN_PER_KILL = 10;
 function loadCoins() { return parseInt(localStorage.getItem('penfps_coins') || '0'); }
 function saveCoins(n) { localStorage.setItem('penfps_coins', n); }
-function loadUnlocked() {
-  const raw = localStorage.getItem('penfps_unlocked');
-  if (!raw) return ['BE2'];
-  try { const arr = JSON.parse(raw); return arr.includes('BE2') ? arr : [...arr,'BE2']; } catch { return ['BE2']; }
-}
-function saveUnlocked(arr) { localStorage.setItem('penfps_unlocked', JSON.stringify(arr)); }
+// Every gun unlocked from the start — ignore stored partial unlocks.
+function loadUnlocked() { return [...WEAPON_ORDER]; }
+function saveUnlocked(arr) { /* no-op: all guns are free */ }
 let coins = loadCoins();
 let unlocked = loadUnlocked();
 
