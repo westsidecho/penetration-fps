@@ -65,6 +65,13 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
 @keyframes hitMark{0%{opacity:1;transform:translate(-50%,-50%) scale(.6)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.3)}}
 
 #pointerLockHint{position:absolute;left:50%;top:60%;transform:translateX(-50%);background:rgba(0,0,0,.7);padding:12px 24px;font-size:12px;letter-spacing:2px;display:none;border:1px solid #ff4655}
+#adsOverlay{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .15s ease;background:radial-gradient(ellipse at center,transparent 28%,rgba(0,0,0,.65) 55%,#000 85%);z-index:50}
+#controlsHint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);font-size:10px;letter-spacing:3px;color:rgba(255,255,255,.55);background:rgba(0,0,0,.4);padding:6px 14px;border:1px solid rgba(255,70,85,.3)}
+#reloadIndicator{position:absolute;left:50%;top:62%;transform:translateX(-50%);display:none;flex-direction:column;align-items:center;gap:6px;z-index:60}
+#reloadIndicator.active{display:flex}
+#reloadIndicator .bar{width:180px;height:6px;background:rgba(0,0,0,.6);border:1px solid #ff4655;overflow:hidden}
+#reloadIndicator .bar .fill{height:100%;background:linear-gradient(90deg,#ff4655,#fbbf24);width:0%}
+#reloadIndicator .lbl{font-size:11px;letter-spacing:4px;color:#ff4655;font-weight:900;text-shadow:0 0 6px #000}
 
 /* Gun Select */
 #gunSelect{position:fixed;inset:0;background:linear-gradient(135deg,#0f0f1a 0%,#1a0f1f 100%);display:none;flex-direction:column;align-items:center;justify-content:flex-start;z-index:110;padding:40px 20px;overflow-y:auto;overflow-x:hidden;scroll-behavior:smooth}
@@ -168,6 +175,9 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
   <div id="killFeed"></div>
   <div id="hudCoins"><span id="hudCoinCount">0</span></div>
   <div id="pointerLockHint">CLICK TO LOCK POINTER</div>
+  <div id="adsOverlay"></div>
+  <div id="reloadIndicator"><div class="bar"><div class="fill"></div></div><div class="lbl">RELOADING</div></div>
+  <div id="controlsHint">[LMB] FIRE  [RMB] AIM  [R] RELOAD  [SHIFT] SPRINT  [SPACE] JUMP</div>
 </div>
 
 <div id="damageNumbers"></div>
@@ -362,8 +372,15 @@ const player = {
   onGround: true,
   ammo: 30, magSize: 30, reserve: 90,
   reloading: false,
+  reloadStart: 0,
+  reloadDuration: 1500,
+  aiming: false,
   lastShot: 0
 };
+
+// Hip-fire vs ADS (aim-down-sights) gun pose
+const GUN_POSE_HIP = { pos: new THREE.Vector3(0.4, -0.35, -0.65), rot: new THREE.Vector3(0.06, -0.2, 0.08), fov: 75 };
+const GUN_POSE_ADS = { pos: new THREE.Vector3(0.0, -0.16, -0.40), rot: new THREE.Vector3(0,    0,    0   ), fov: 48 };
 camera.position.copy(player.pos);
 
 // ══════════════════════════════════════════════════════
@@ -791,8 +808,15 @@ document.addEventListener('mousemove', e => {
 });
 
 let mouseDown = false;
-document.addEventListener('mousedown', e => { if (e.button===0) mouseDown = true; });
-document.addEventListener('mouseup', e => { if (e.button===0) mouseDown = false; });
+document.addEventListener('mousedown', e => {
+  if (e.button === 0) mouseDown = true;
+  if (e.button === 2 && pointerLocked) player.aiming = true;
+});
+document.addEventListener('mouseup', e => {
+  if (e.button === 0) mouseDown = false;
+  if (e.button === 2) player.aiming = false;
+});
+document.addEventListener('contextmenu', e => e.preventDefault());
 
 // ══════════════════════════════════════════════════════
 //   SHOOTING
@@ -823,9 +847,10 @@ function shoot() {
   camera.getWorldPosition(origin);
   const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
 
-  // Spread
-  dir.x += (Math.random()-0.5) * currentWeapon.spread;
-  dir.y += (Math.random()-0.5) * currentWeapon.spread;
+  // Spread (ADS = much tighter)
+  const spreadMul = player.aiming ? 0.25 : 1.0;
+  dir.x += (Math.random()-0.5) * currentWeapon.spread * spreadMul;
+  dir.y += (Math.random()-0.5) * currentWeapon.spread * spreadMul;
   dir.normalize();
 
   traceShot(origin, dir, currentWeapon.damage, RANGE);
@@ -931,6 +956,8 @@ function traceShotPenetrated(origin, dir, damage, remainingRange, wallType) {
 function reload() {
   if (player.reloading || player.ammo === player.magSize || player.reserve <= 0) return;
   player.reloading = true;
+  player.reloadStart = performance.now();
+  player.aiming = false; // can't ADS while reloading
   document.getElementById('gunName').textContent = 'RELOADING...';
   setTimeout(() => {
     const needed = player.magSize - player.ammo;
@@ -940,7 +967,7 @@ function reload() {
     player.reloading = false;
     document.getElementById('gunName').textContent = currentWeapon ? currentWeapon.name : 'WEAPON';
     updateHUD();
-  }, 1500);
+  }, player.reloadDuration);
 }
 
 // ══════════════════════════════════════════════════════
@@ -1138,11 +1165,50 @@ function update(dt) {
   camera.rotation.y = player.yaw;
   camera.rotation.x = player.pitch;
 
-  // Gun sway & recoil recovery
-  gun.position.z += (-0.5 - gun.position.z) * 0.15;
-  gun.rotation.x *= 0.85;
-  const bob = Math.sin(performance.now() * 0.01) * move.length() * 0.005;
-  gun.position.y = -0.25 + bob;
+  // ─── Gun pose: hip vs ADS lerp + reload animation + bob ───
+  const target = player.aiming && !player.reloading ? GUN_POSE_ADS : GUN_POSE_HIP;
+
+  // Reload sine bump: gun dips down + tilts during reload, peaks at midpoint
+  let reloadDip = 0, reloadTilt = 0, reloadRoll = 0;
+  if (player.reloading) {
+    const t = Math.min(1, (performance.now() - player.reloadStart) / player.reloadDuration);
+    const phase = Math.sin(t * Math.PI);   // 0 -> 1 -> 0
+    reloadDip  = -0.35 * phase;
+    reloadTilt = -0.9  * phase;            // pitch down
+    reloadRoll =  0.4  * phase;            // slight roll like inserting mag
+  }
+
+  const bob = (!player.aiming && !player.reloading)
+    ? Math.sin(performance.now() * 0.01) * move.length() * 0.005
+    : 0;
+
+  const k = 0.18; // lerp rate
+  gun.position.x += (target.pos.x                      - gun.position.x) * k;
+  gun.position.y += (target.pos.y + reloadDip + bob    - gun.position.y) * k;
+  gun.position.z += (target.pos.z                      - gun.position.z) * k;
+  gun.rotation.x += (target.rot.x + reloadTilt         - gun.rotation.x) * k;
+  gun.rotation.y += (target.rot.y                      - gun.rotation.y) * k;
+  gun.rotation.z += (target.rot.z + reloadRoll         - gun.rotation.z) * k;
+
+  // Camera FOV lerp for smooth zoom
+  camera.fov += (target.fov - camera.fov) * k;
+  camera.updateProjectionMatrix();
+
+  // ADS overlay (vignette darken)
+  const ads = document.getElementById('adsOverlay');
+  if (ads) ads.style.opacity = (player.aiming && !player.reloading) ? '1' : '0';
+
+  // Reload progress bar
+  const ri = document.getElementById('reloadIndicator');
+  if (ri) {
+    if (player.reloading) {
+      ri.classList.add('active');
+      const t = Math.min(1, (performance.now() - player.reloadStart) / player.reloadDuration);
+      ri.querySelector('.fill').style.width = (t*100).toFixed(0) + '%';
+    } else {
+      ri.classList.remove('active');
+    }
+  }
 
   // Shoot
   if (mouseDown) shoot();
