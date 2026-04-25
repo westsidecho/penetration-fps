@@ -90,7 +90,13 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
 #mpMenu.active,#mpLobby.active{display:flex}
 #mpMenu h1,#mpLobby h1{font-size:54px;letter-spacing:14px;color:#10b981;text-shadow:0 0 20px rgba(16,185,129,.5);margin-bottom:6px}
 #mpMenu .sub,#mpLobby .sub{font-size:12px;letter-spacing:6px;color:#888;margin-bottom:30px}
-.mpPanel{background:rgba(20,30,28,.85);border:1px solid #10b981;padding:30px 40px;min-width:400px;display:flex;flex-direction:column;gap:14px}
+.mpPanel{background:rgba(20,30,28,.85);border:1px solid #10b981;padding:24px 32px;min-width:400px;display:flex;flex-direction:column;gap:14px}
+.mpIdentity{margin-bottom:20px;border-color:#fbbf24;background:rgba(40,30,10,.85)}
+.mpIdentity label{color:#fbbf24 !important}
+.mpActions{display:flex;gap:18px;flex-wrap:wrap;justify-content:center;max-width:900px}
+.mpAction{flex:1;min-width:340px}
+.mpAction .actionTitle{font-size:16px;font-weight:900;letter-spacing:3px;color:#10b981;margin-bottom:4px}
+.mpAction .actionDesc{font-size:11px;color:#888;letter-spacing:1px;margin-bottom:8px}
 .mpPanel .row{display:flex;flex-direction:column;gap:6px}
 .mpPanel label{font-size:11px;letter-spacing:3px;color:#888}
 .mpPanel input{background:#0a0a0a;color:#10b981;border:1px solid #444;padding:12px;font-size:16px;font-family:inherit;outline:none}
@@ -189,27 +195,34 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
 <div id="mpMenu">
   <h1>PARTY</h1>
   <div class="sub">// MULTIPLAYER LOBBY</div>
-  <div class="mpPanel">
+
+  <!-- Your identity (used for both create AND join) -->
+  <div class="mpPanel mpIdentity">
     <div class="row">
-      <label>NICKNAME</label>
-      <input id="mpName" maxlength="16" placeholder="PLAYER">
-    </div>
-    <div class="row">
-      <button class="big" onclick="mpCreateRoom()">CREATE PARTY</button>
-    </div>
-    <div class="divider">— OR —</div>
-    <div class="row">
-      <label>CODE</label>
-      <input id="mpJoinCode" maxlength="4" placeholder="XXXX" style="text-transform:uppercase;letter-spacing:6px;font-weight:900;text-align:center">
-    </div>
-    <div class="row">
-      <button class="big" onclick="mpJoinRoom()">JOIN PARTY</button>
-    </div>
-    <div id="mpStatus" class="mpStatus"></div>
-    <div class="row">
-      <button onclick="backToMenu()" style="background:#444">BACK</button>
+      <label>YOUR NICKNAME ▸ <span style="color:#10b981">호스트도 참가자도 이 이름으로 보입니다</span></label>
+      <input id="mpName" maxlength="16" placeholder="PLAYER" style="font-size:18px;letter-spacing:2px;text-align:center">
     </div>
   </div>
+
+  <!-- Two clear actions: Create OR Join -->
+  <div class="mpActions">
+    <div class="mpPanel mpAction">
+      <div class="actionTitle">🟢 새 파티 만들기</div>
+      <div class="actionDesc">방을 만들고 코드를 친구한테 공유하세요</div>
+      <button class="big" onclick="mpCreateRoom()">CREATE PARTY</button>
+    </div>
+    <div class="mpPanel mpAction">
+      <div class="actionTitle">🔵 기존 파티 참가</div>
+      <div class="actionDesc">친구한테 받은 4글자 코드 입력</div>
+      <div class="row">
+        <input id="mpJoinCode" maxlength="4" placeholder="XXXX" style="text-transform:uppercase;letter-spacing:8px;font-weight:900;text-align:center;font-size:22px">
+      </div>
+      <button class="big" onclick="mpJoinRoom()">JOIN PARTY</button>
+    </div>
+  </div>
+
+  <div id="mpStatus" class="mpStatus"></div>
+  <button onclick="backToMenu()" style="background:#444;color:#fff;border:none;padding:10px 30px;font-weight:900;letter-spacing:3px;cursor:pointer;font-family:inherit;margin-top:14px">BACK</button>
 </div>
 
 <div id="mpLobby">
@@ -745,6 +758,24 @@ function openMultiplayer() {
   const stored = localStorage.getItem('penfps_name');
   if (stored) document.getElementById('mpName').value = stored;
   mpStatus('');
+  // If no stored name, focus the nickname field; otherwise focus the join code
+  setTimeout(() => {
+    if (!stored) document.getElementById('mpName').focus();
+    else document.getElementById('mpJoinCode').focus();
+  }, 100);
+}
+
+// Validate nickname before any party action
+function mpValidateName() {
+  const name = (document.getElementById('mpName').value || '').trim();
+  if (!name) {
+    mpStatus('먼저 닉네임을 입력하세요!', true);
+    document.getElementById('mpName').focus();
+    document.getElementById('mpName').style.borderColor = '#ff4655';
+    setTimeout(() => { document.getElementById('mpName').style.borderColor = ''; }, 1500);
+    return null;
+  }
+  return name.slice(0, 16);
 }
 
 function generateRoomCode() {
@@ -755,7 +786,8 @@ function generateRoomCode() {
 }
 
 function mpCreateRoom() {
-  const name = (document.getElementById('mpName').value || 'PLAYER').slice(0, 16);
+  const name = mpValidateName();
+  if (!name) return;
   mp.myName = name;
   localStorage.setItem('penfps_name', name);
   mp.isHost = true;
@@ -847,9 +879,10 @@ function mpBroadcastFromHost(msg, excludeId) {
 }
 
 function mpJoinRoom() {
-  const name = (document.getElementById('mpName').value || 'PLAYER').slice(0, 16);
+  const name = mpValidateName();
+  if (!name) return;
   const code = (document.getElementById('mpJoinCode').value || '').toUpperCase().trim();
-  if (code.length !== 4) { mpStatus('CODE MUST BE 4 CHARACTERS', true); return; }
+  if (code.length !== 4) { mpStatus('코드는 4글자여야 합니다 (예: XKM7)', true); return; }
   mp.myName = name;
   localStorage.setItem('penfps_name', name);
   mp.isHost = false;
