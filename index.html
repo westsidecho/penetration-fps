@@ -463,20 +463,20 @@ mapLoader.load('models/fps_tdm_map.glb', (gltf) => {
     c.receiveShadow = true;
     if (c.geometry && !c.geometry.boundingBox) c.geometry.computeBoundingBox();
     mapMeshes.push(c);
+    // ALL map meshes block bullets as solid walls (so building exteriors stop shots)
+    c.userData.isWall = true;
+    c.userData.penType = 'Solid';
     const aabb = new THREE.Box3().setFromObject(c);
     const meshSz = aabb.getSize(new THREE.Vector3());
     const meshVol = meshSz.x * meshSz.y * meshSz.z;
-    // Skip the floor itself (huge, flat)
+    // The walls[] array is used as a fallback for AABB collision; we now skip
+    // huge building shells from THAT array so AABB doesn't trap players inside,
+    // but the mesh itself stays in mapMeshes for raycast collision + bullets.
     if (meshSz.x > 40 && meshSz.z > 40 && meshSz.y < 2) return;
-    // Skip building shells / room hulls — anything big enough to contain the player.
-    // A typical building shell is 20×10×10 or larger (volume > 1000).
     if (meshVol > 1000) { skippedHuge++; return; }
-    if (meshSz.y > 18) { skippedHuge++; return; }     // tall walls = envelope
-    // Skip ultra-small fragments
+    if (meshSz.y > 18) { skippedHuge++; return; }
     if (meshSz.x < 0.1 && meshSz.y < 0.1 && meshSz.z < 0.1) return;
     walls.push({ mesh: c, penType: 'Solid', aabb });
-    c.userData.penType = 'Solid';
-    c.userData.isWall = true;
     colliderCount++;
   });
   console.log(`Map: ${totalMeshes} meshes, ${colliderCount} colliders, ${skippedHuge} skipped (envelopes)`);
@@ -1385,55 +1385,177 @@ function teleportToMap(key) {
 // ══════════════════════════════════════════════════════
 const enemies = [];
 
+// Procedural block soldier — cleaner proportions, plate carrier, helmet, rifle
+// Each enemy stores references to limbs so we can animate them.
+const ENEMY_SKINS = [
+  { skin: 0xd4a574, uniform: 0x6b7a3a, vest: 0x3a3a30, helmet: 0x4a4a30, pants: 0x5a6a30 }, // desert
+  { skin: 0xc89972, uniform: 0x4a5a3a, vest: 0x2a2a25, helmet: 0x3a4030, pants: 0x405030 }, // forest
+  { skin: 0xddb588, uniform: 0x6b5a3a, vest: 0x3a302a, helmet: 0x4a3a2a, pants: 0x5a4a30 }, // tan
+];
+
 function createEnemy(x, z) {
   const group = new THREE.Group();
+  const skin = ENEMY_SKINS[Math.floor(Math.random() * ENEMY_SKINS.length)];
 
-  // Body
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(0.6, 1.2, 0.4),
-    new THREE.MeshStandardMaterial({ color:0xaa2233, roughness:0.7 })
-  );
-  body.position.y = 0.6;
-  body.castShadow = true;
-  group.add(body);
+  const M = (color, rough = 0.7, metal = 0.05) =>
+    new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
 
-  // Head
-  const head = new THREE.Mesh(
-    new THREE.BoxGeometry(0.35, 0.35, 0.35),
-    new THREE.MeshStandardMaterial({ color:0xe8c9a0, roughness:0.5 })
+  const matSkin    = M(skin.skin,    0.6);
+  const matUniform = M(skin.uniform, 0.85);
+  const matVest    = M(skin.vest,    0.5, 0.2);
+  const matHelmet  = M(skin.helmet,  0.4, 0.3);
+  const matPants   = M(skin.pants,   0.85);
+  const matBoots   = M(0x1a1a1a,     0.6);
+  const matGloves  = M(0x2a2520,     0.6);
+  const matGun     = M(0x1f1f24,     0.4, 0.5);
+  const matGunWood = M(0x4a3020,     0.6);
+  const matEye     = M(0x000000,     0.2);
+
+  // ── LEGS (hip-pivot groups so swinging looks natural) ──
+  const legGeo  = new THREE.BoxGeometry(0.22, 0.78, 0.26);
+  const kneeGeo = new THREE.BoxGeometry(0.24, 0.1,  0.1);
+  const bootGeo = new THREE.BoxGeometry(0.24, 0.12, 0.34);
+
+  function makeLeg(side) {
+    const hip = new THREE.Group();
+    hip.position.set(side * 0.13, 0.78, 0);
+    const leg = new THREE.Mesh(legGeo, matPants);
+    leg.position.set(0, -0.39, 0); leg.castShadow = true;
+    hip.add(leg);
+    const knee = new THREE.Mesh(kneeGeo, matVest);
+    knee.position.set(0, -0.33, 0.13);
+    hip.add(knee);
+    const boot = new THREE.Mesh(bootGeo, matBoots);
+    boot.position.set(0, -0.72, 0.04); boot.castShadow = true;
+    hip.add(boot);
+    return hip;
+  }
+  const legL = makeLeg(-1);
+  const legR = makeLeg( 1);
+  group.add(legL); group.add(legR);
+
+  // ── TORSO + VEST ──
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.62, 0.32), matUniform);
+  torso.position.set(0, 1.1, 0);
+  group.add(torso);
+
+  // Plate carrier (slightly larger, bulky)
+  const vest = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.58, 0.4), matVest);
+  vest.position.set(0, 1.12, 0);
+  group.add(vest);
+
+  // Mag pouches across the chest
+  for (let i = 0; i < 3; i++) {
+    const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.16, 0.08), matVest);
+    pouch.position.set(-0.16 + i * 0.16, 1.08, 0.22);
+    group.add(pouch);
+  }
+  // Radio antenna on shoulder
+  const antenna = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012, 0.012, 0.35, 6),
+    M(0x111, 0.6)
   );
-  head.position.y = 1.4;
-  head.castShadow = true;
+  antenna.position.set(-0.22, 1.55, -0.1);
+  antenna.rotation.z = -0.2;
+  group.add(antenna);
+
+  // ── ARMS (shoulder-pivot groups, holding rifle in front) ──
+  const armUpperGeo = new THREE.BoxGeometry(0.16, 0.4,  0.18);
+  const armLowerGeo = new THREE.BoxGeometry(0.14, 0.36, 0.16);
+  const handGeo     = new THREE.BoxGeometry(0.13, 0.13, 0.13);
+
+  function makeArm(side) {
+    const shoulder = new THREE.Group();
+    shoulder.position.set(side * 0.34, 1.42, 0);
+    const upper = new THREE.Mesh(armUpperGeo, matUniform);
+    upper.position.set(0, -0.2, 0); upper.castShadow = true;
+    shoulder.add(upper);
+    const lower = new THREE.Mesh(armLowerGeo, matUniform);
+    lower.position.set(0, -0.55, 0.12);
+    lower.rotation.x = -0.6;
+    lower.castShadow = true;
+    shoulder.add(lower);
+    const hand = new THREE.Mesh(handGeo, matGloves);
+    hand.position.set(0, -0.74, 0.32);
+    shoulder.add(hand);
+    return shoulder;
+  }
+  const armL = makeArm(-1);
+  const armR = makeArm( 1);
+  // Both arms angled slightly forward (rifle hold)
+  armL.rotation.x = -0.2;
+  armR.rotation.x = -0.2;
+  group.add(armL); group.add(armR);
+
+  // ── HEAD ──
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.3, 0.27), matSkin);
+  head.position.set(0, 1.58, 0);
   group.add(head);
 
-  // Armor plate
-  const armor = new THREE.Mesh(
-    new THREE.BoxGeometry(0.65, 0.6, 0.45),
-    new THREE.MeshStandardMaterial({ color:0x444455, metalness:0.6, roughness:0.4 })
-  );
-  armor.position.y = 0.7;
-  group.add(armor);
+  // Eyes (dark visor strip)
+  const eyeStrip = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 0.02), matEye);
+  eyeStrip.position.set(0, 1.6, 0.135);
+  group.add(eyeStrip);
 
-  // Legs
-  const leg1 = new THREE.Mesh(
-    new THREE.BoxGeometry(0.22, 0.6, 0.3),
-    new THREE.MeshStandardMaterial({ color:0x333340 })
+  // ── HELMET ──
+  // Top dome
+  const helmetTop = new THREE.Mesh(
+    new THREE.SphereGeometry(0.2, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+    matHelmet
   );
-  leg1.position.set(-0.15, 0, 0);
-  leg1.castShadow = true;
-  group.add(leg1);
-  const leg2 = leg1.clone();
-  leg2.position.x = 0.15;
-  group.add(leg2);
+  helmetTop.position.set(0, 1.7, 0);
+  helmetTop.scale.set(1, 0.85, 1.1);
+  group.add(helmetTop);
+  // Brim
+  const helmetBrim = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.04, 0.32), matHelmet);
+  helmetBrim.position.set(0, 1.66, 0);
+  group.add(helmetBrim);
+  // NVG mount on front of helmet
+  const nvg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.06), matVest);
+  nvg.position.set(0, 1.74, 0.18);
+  group.add(nvg);
+
+  // ── RIFLE held in hands (in front, angled) ──
+  const rifle = new THREE.Group();
+  // Body
+  const rfBody = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.55), matGun);
+  rifle.add(rfBody);
+  // Barrel
+  const rfBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.4, 8), matGun);
+  rfBarrel.rotation.x = Math.PI / 2;
+  rfBarrel.position.set(0, 0.02, 0.42);
+  rifle.add(rfBarrel);
+  // Stock (wood-ish back)
+  const rfStock = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.13, 0.18), matGunWood);
+  rfStock.position.set(0, -0.02, -0.28);
+  rifle.add(rfStock);
+  // Magazine
+  const rfMag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.17, 0.07), matGun);
+  rfMag.position.set(0, -0.13, -0.05);
+  rifle.add(rfMag);
+  // Scope
+  const rfScope = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.12, 10), matGun);
+  rfScope.rotation.x = Math.PI / 2;
+  rfScope.position.set(0, 0.08, -0.05);
+  rifle.add(rfScope);
+
+  rifle.position.set(0.05, 0.78, 0.32);
+  group.add(rifle);
+
+  // Shadows
+  group.traverse(c => { if (c.isMesh) c.castShadow = true; });
 
   group.position.set(x, 0, z);
   scene.add(group);
 
   const enemy = {
     group, health: 100, armor: 50, maxHealth: 100, maxArmor: 50,
-    pos: group.position, speed: 2.5 + Math.random()*1.5,
-    state: 'patrol', target: new THREE.Vector3(x,0,z),
-    hitFlash: 0, dead: false, lastShot: 0
+    pos: group.position, speed: 2.5 + Math.random() * 1.5,
+    state: 'patrol', target: new THREE.Vector3(x, 0, z),
+    hitFlash: 0, dead: false, lastShot: 0,
+    bobPhase: Math.random() * Math.PI * 2,
+    // Limb refs for animation (hip & shoulder groups)
+    legL, legR, armL, armR, head, rifle,
   };
   enemies.push(enemy);
   return enemy;
@@ -1541,7 +1663,8 @@ function mpRaycastPlayers(origin, dir, damage) {
   if (hits.length === 0) return;
   // Check if a wall blocks first
   const wallRC = new THREE.Raycaster(origin, dir, 0, hits[0].distance);
-  const wallHits = wallRC.intersectObjects(walls.map(w=>w.mesh).filter(m=>m.userData.penType==='Solid'), false);
+  const wallBlockers = mapMeshes.length > 0 ? mapMeshes : walls.map(w=>w.mesh).filter(m=>m.userData.penType==='Solid');
+  const wallHits = wallRC.intersectObjects(wallBlockers, false);
   if (wallHits.length > 0) return;
   const hit = hits[0];
   const target = hit.object.userData._owner;
@@ -1559,7 +1682,7 @@ function traceShot(origin, dir, damage, remainingRange) {
   const raycaster = new THREE.Raycaster(origin, dir, 0, remainingRange);
 
   // Collect all potential targets
-  const targets = [...walls.map(w=>w.mesh), ...enemies.filter(e=>!e.dead).flatMap(e=>
+  const targets = [...(mapMeshes.length>0 ? mapMeshes : walls.map(w=>w.mesh)), ...enemies.filter(e=>!e.dead).flatMap(e=>
     e.group.children.map(c => { c.userData.enemy = e; return c; })
   )];
 
@@ -1616,7 +1739,7 @@ function traceShot(origin, dir, damage, remainingRange) {
 function traceShotPenetrated(origin, dir, damage, remainingRange, wallType) {
   if (remainingRange <= 0 || damage <= 1) return;
   const raycaster = new THREE.Raycaster(origin, dir, 0.01, remainingRange);
-  const targets = [...walls.map(w=>w.mesh), ...enemies.filter(e=>!e.dead).flatMap(e=>
+  const targets = [...(mapMeshes.length>0 ? mapMeshes : walls.map(w=>w.mesh)), ...enemies.filter(e=>!e.dead).flatMap(e=>
     e.group.children.map(c => { c.userData.enemy = e; return c; })
   )];
   const hits = raycaster.intersectObjects(targets, false);
@@ -1792,29 +1915,73 @@ function killEnemy(enemy) {
 // ══════════════════════════════════════════════════════
 //   COLLISION
 // ══════════════════════════════════════════════════════
-// Side-collision: ignore walls whose top is at/below the player's feet (we're standing on them)
+// Raycast-based collision against actual GLB triangles (no more AABB pass-through)
+const _collRay = new THREE.Raycaster();
+const _collOrigin = new THREE.Vector3();
+const _collDirs = [
+  new THREE.Vector3( 1, 0,  0),
+  new THREE.Vector3(-1, 0,  0),
+  new THREE.Vector3( 0, 0,  1),
+  new THREE.Vector3( 0, 0, -1),
+  new THREE.Vector3( 0.707, 0,  0.707),
+  new THREE.Vector3(-0.707, 0,  0.707),
+  new THREE.Vector3( 0.707, 0, -0.707),
+  new THREE.Vector3(-0.707, 0, -0.707),
+];
+
 function checkCollision(pos, radius=0.4) {
+  // Prefer raycast against real geometry once map is loaded
+  if (mapMeshes.length > 0) {
+    _collRay.far = radius + 0.05;
+    // Sample 3 heights — knees / chest / shoulders — to catch low walls and overhangs
+    const ys = [pos.y - 1.4, pos.y - 0.6, pos.y - 0.1];
+    for (const y of ys) {
+      _collOrigin.set(pos.x, y, pos.z);
+      for (const d of _collDirs) {
+        _collRay.set(_collOrigin, d);
+        const hits = _collRay.intersectObjects(mapMeshes, false);
+        if (hits.length > 0 && hits[0].distance <= radius) {
+          // Don't block if obstacle top is below feet (we're standing on it)
+          const feetY = pos.y - 1.7;
+          let bb = hits[0].object.userData._aabb;
+          if (!bb) bb = hits[0].object.userData._aabb = new THREE.Box3().setFromObject(hits[0].object);
+          if (bb.max.y <= feetY + 0.05) continue;
+          return { mesh: hits[0].object, aabb: bb };
+        }
+      }
+    }
+    return null;
+  }
+  // Fallback (no map yet): old AABB check
   const feetY = pos.y - 1.7;
   const tmp = new THREE.Box3();
   for (const w of walls) {
     const src = w.aabb || (w.aabb = new THREE.Box3().setFromObject(w.mesh));
-    if (src.max.y <= feetY + 0.05) continue; // we're standing on top of this wall
+    if (src.max.y <= feetY + 0.05) continue;
     tmp.copy(src).expandByScalar(radius);
     if (tmp.containsPoint(pos)) return w;
   }
   return null;
 }
 
-// Multi-level ground detection: returns the highest wall-top under the player (0 = floor)
+// Ground height via downward raycast (handles arbitrary terrain & platforms)
+const _groundRay = new THREE.Raycaster();
+const _groundDown = new THREE.Vector3(0, -1, 0);
 function getGroundHeight(pos, radius=0.4) {
+  if (mapMeshes.length > 0) {
+    _groundRay.set(_collOrigin.set(pos.x, pos.y + 0.4, pos.z), _groundDown);
+    _groundRay.far = 50;
+    const hits = _groundRay.intersectObjects(mapMeshes, false);
+    if (hits.length > 0) return hits[0].point.y;
+    return 0;
+  }
+  // Fallback AABB scan
   let topY = 0;
   const feetY = pos.y - 1.7;
   for (const w of walls) {
     const b = w.aabb || (w.aabb = new THREE.Box3().setFromObject(w.mesh));
-    const minX = b.min.x - radius, maxX = b.max.x + radius;
-    const minZ = b.min.z - radius, maxZ = b.max.z + radius;
-    if (pos.x >= minX && pos.x <= maxX && pos.z >= minZ && pos.z <= maxZ) {
-      // Only consider walls at or just below feet (allow small step-down tolerance)
+    if (pos.x >= b.min.x - radius && pos.x <= b.max.x + radius &&
+        pos.z >= b.min.z - radius && pos.z <= b.max.z + radius) {
       if (b.max.y > topY && b.max.y <= feetY + 0.4) topY = b.max.y;
     }
   }
@@ -1973,6 +2140,19 @@ function update(dt) {
   for (const e of enemies) {
     if (e.dead) continue;
 
+    // GLB animations (idle / walk loop if available)
+    if (e.group.userData.mixer) e.group.userData.mixer.update(dt);
+
+    // Snap to ground (so soldiers stand on whatever surface is under them)
+    if (mapMeshes.length > 0) {
+      _groundRay.set(_collOrigin.set(e.pos.x, e.pos.y + 5, e.pos.z), _groundDown);
+      _groundRay.far = 60;
+      const gh = _groundRay.intersectObjects(mapMeshes, false);
+      if (gh.length > 0) e.pos.y = gh[0].point.y;
+    }
+
+    let isMoving = false;
+
     // AI: wander + aggro
     const toPlayer = new THREE.Vector3().subVectors(player.pos, e.pos);
     toPlayer.y = 0;
@@ -1981,33 +2161,37 @@ function update(dt) {
     if (dist < 25) {
       e.state = 'attack';
       toPlayer.normalize();
-      // Face player
-      e.group.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
+      // Face player (smoothly rotate)
+      const targetYaw = Math.atan2(toPlayer.x, toPlayer.z);
+      let dy = targetYaw - e.group.rotation.y;
+      while (dy >  Math.PI) dy -= Math.PI*2;
+      while (dy < -Math.PI) dy += Math.PI*2;
+      e.group.rotation.y += dy * Math.min(1, dt * 6);
 
       // Move toward player if far
       if (dist > 8) {
         const step = toPlayer.clone().multiplyScalar(e.speed * dt);
         const np = e.pos.clone().add(step);
-        if (!checkCollision(np, 0.5)) e.pos.add(step);
+        if (!checkCollision(np, 0.5)) {
+          e.pos.add(step);
+          isMoving = true;
+        }
       }
 
-      // Shoot player
+      // Shoot player (with LoS check against actual map geometry)
       if (dist < 20 && performance.now() - e.lastShot > 1200) {
         e.lastShot = performance.now();
-        // raycast to check LOS
-        const origin = e.pos.clone(); origin.y = 1.4;
+        const origin = e.pos.clone(); origin.y += 1.4;
         const toP = new THREE.Vector3().subVectors(player.pos, origin).normalize();
         const rc = new THREE.Raycaster(origin, toP, 0, 30);
-        const blockers = walls.filter(w => w.penType==='Solid').map(w=>w.mesh);
-        const hits = rc.intersectObjects(blockers);
+        const blockers = mapMeshes.length > 0 ? mapMeshes : walls.map(w=>w.mesh);
+        const hits = rc.intersectObjects(blockers, false);
         if (hits.length === 0 || hits[0].distance > dist - 1) {
-          // hit player
           const baseDmg = 8 + Math.random()*6;
           const pTarget = { armor: player.armor, health: player.health };
-          const r = calculateDamage(baseDmg, null, pTarget);
+          calculateDamage(baseDmg, null, pTarget);
           player.armor = pTarget.armor;
           player.health = pTarget.health;
-          // screen flash
           document.getElementById('hud').style.boxShadow = 'inset 0 0 60px rgba(255,0,0,0.5)';
           setTimeout(()=>document.getElementById('hud').style.boxShadow='', 100);
           if (player.health <= 0) gameOver();
@@ -2016,13 +2200,28 @@ function update(dt) {
       }
     }
 
-    e.group.position.copy(e.pos);
+    // Walking bob + leg/arm swing
+    e.bobPhase += dt * (isMoving ? 9 : 1.5);
+    const bobY = isMoving ? Math.abs(Math.sin(e.bobPhase)) * 0.06 : Math.sin(e.bobPhase) * 0.015;
+    e.group.position.set(e.pos.x, e.pos.y + bobY, e.pos.z);
+    // Limb swing — legs alternate from hip, arms swing slightly while keeping rifle stance
+    const swing = isMoving ? Math.sin(e.bobPhase) * 0.7 : Math.sin(e.bobPhase) * 0.04;
+    if (e.legL) e.legL.rotation.x =  swing;
+    if (e.legR) e.legR.rotation.x = -swing;
+    if (e.armL) e.armL.rotation.x = -0.2 + swing * 0.15;  // base forward + counter-swing
+    if (e.armR) e.armR.rotation.x = -0.2 - swing * 0.15;
+    // Subtle head tracking toward player when in attack state
+    if (e.head && e.state === 'attack') {
+      const lookX = Math.atan2(player.pos.y - (e.pos.y + 1.55),
+                               Math.hypot(player.pos.x - e.pos.x, player.pos.z - e.pos.z));
+      e.head.rotation.x = -Math.max(-0.5, Math.min(0.5, lookX));
+    }
 
-    // hit flash
+    // hit flash (red glow on body when shot)
     if (e.hitFlash > 0) {
       e.hitFlash -= dt * 4;
-      e.group.children.forEach(c => {
-        if (c.material && c.material.emissive) {
+      e.group.traverse(c => {
+        if (c.isMesh && c.material && c.material.emissive) {
           c.material.emissive.setRGB(e.hitFlash, 0, 0);
         }
       });
