@@ -1350,7 +1350,9 @@ function teleportToMap(key) {
   if (!mp.active) {
     for (let i=0; i<6; i++) {
       const angle = (i/6) * Math.PI * 2;
-      createEnemy(Math.cos(angle)*15, Math.sin(angle)*15 - 5);
+      // Alternate teams so red/blue split evenly
+      const team = i % 2 === 0 ? 'red' : 'blue';
+      createEnemy(Math.cos(angle)*15, Math.sin(angle)*15 - 5, team);
     }
   } else {
     // Notify others of our chosen weapon
@@ -1387,15 +1389,18 @@ const enemies = [];
 
 // Procedural block soldier — cleaner proportions, plate carrier, helmet, rifle
 // Each enemy stores references to limbs so we can animate them.
-const ENEMY_SKINS = [
-  { skin: 0xd4a574, uniform: 0x6b7a3a, vest: 0x3a3a30, helmet: 0x4a4a30, pants: 0x5a6a30 }, // desert
-  { skin: 0xc89972, uniform: 0x4a5a3a, vest: 0x2a2a25, helmet: 0x3a4030, pants: 0x405030 }, // forest
-  { skin: 0xddb588, uniform: 0x6b5a3a, vest: 0x3a302a, helmet: 0x4a3a2a, pants: 0x5a4a30 }, // tan
+// TEAMS: enemies fight other teams (and player) — free-for-all between red/blue,
+// player is hostile to both.
+const ENEMY_TEAMS = [
+  { id: 'red',  skin: 0xd4a574, uniform: 0x5a3a3a, vest: 0x4a2a2a, helmet: 0x4a2a2a, pants: 0x4a3030, accent: 0xff4655 },
+  { id: 'blue', skin: 0xc89972, uniform: 0x3a4a5a, vest: 0x252a3a, helmet: 0x303a4a, pants: 0x303040, accent: 0x3b6dff },
 ];
 
-function createEnemy(x, z) {
+function createEnemy(x, z, teamOverride) {
   const group = new THREE.Group();
-  const skin = ENEMY_SKINS[Math.floor(Math.random() * ENEMY_SKINS.length)];
+  const skin = teamOverride
+    ? ENEMY_TEAMS.find(t => t.id === teamOverride)
+    : ENEMY_TEAMS[Math.floor(Math.random() * ENEMY_TEAMS.length)];
 
   const M = (color, rough = 0.7, metal = 0.05) =>
     new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
@@ -1407,9 +1412,13 @@ function createEnemy(x, z) {
   const matPants   = M(skin.pants,   0.85);
   const matBoots   = M(0x1a1a1a,     0.6);
   const matGloves  = M(0x2a2520,     0.6);
-  const matGun     = M(0x1f1f24,     0.4, 0.5);
-  const matGunWood = M(0x4a3020,     0.6);
+  const matGun     = M(0x1a1a1f,     0.35, 0.55);
+  const matGunWood = M(0x5a3a25,     0.6);
+  const matGunMetal= M(0x6a6a72,     0.3, 0.85);
   const matEye     = M(0x000000,     0.2);
+  const matAccent  = new THREE.MeshStandardMaterial({
+    color: skin.accent, emissive: skin.accent, emissiveIntensity: 0.5, roughness: 0.4
+  });
 
   // ── LEGS (hip-pivot groups so swinging looks natural) ──
   const legGeo  = new THREE.BoxGeometry(0.22, 0.78, 0.26);
@@ -1515,31 +1524,65 @@ function createEnemy(x, z) {
   nvg.position.set(0, 1.74, 0.18);
   group.add(nvg);
 
-  // ── RIFLE held in hands (in front, angled) ──
-  const rifle = new THREE.Group();
-  // Body
-  const rfBody = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.55), matGun);
-  rifle.add(rfBody);
-  // Barrel
-  const rfBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.4, 8), matGun);
-  rfBarrel.rotation.x = Math.PI / 2;
-  rfBarrel.position.set(0, 0.02, 0.42);
-  rifle.add(rfBarrel);
-  // Stock (wood-ish back)
-  const rfStock = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.13, 0.18), matGunWood);
-  rfStock.position.set(0, -0.02, -0.28);
-  rifle.add(rfStock);
-  // Magazine
-  const rfMag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.17, 0.07), matGun);
-  rfMag.position.set(0, -0.13, -0.05);
-  rifle.add(rfMag);
-  // Scope
-  const rfScope = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.12, 10), matGun);
-  rfScope.rotation.x = Math.PI / 2;
-  rfScope.position.set(0, 0.08, -0.05);
-  rifle.add(rfScope);
+  // ── TEAM COLOR ACCENTS (shoulder patches, helmet stripe) ──
+  const shoulderPatchL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.08, 0.2), matAccent);
+  shoulderPatchL.position.set(-0.34, 1.36, 0);
+  group.add(shoulderPatchL);
+  const shoulderPatchR = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.08, 0.2), matAccent);
+  shoulderPatchR.position.set( 0.34, 1.36, 0);
+  group.add(shoulderPatchR);
+  // Helmet team stripe
+  const helmetStripe = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.04, 0.04), matAccent);
+  helmetStripe.position.set(0, 1.78, 0);
+  group.add(helmetStripe);
 
-  rifle.position.set(0.05, 0.78, 0.32);
+  // ── RIFLE held in hands (bigger, more visible) ──
+  const rifle = new THREE.Group();
+  // Main body / receiver (chunky)
+  const rfBody = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.14, 0.45), matGun);
+  rifle.add(rfBody);
+  // Hand guard (front of receiver)
+  const rfHandguard = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.25), matGun);
+  rfHandguard.position.set(0, 0, 0.32);
+  rifle.add(rfHandguard);
+  // Barrel (long, pokes forward)
+  const rfBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.5, 10), matGunMetal);
+  rfBarrel.rotation.x = Math.PI / 2;
+  rfBarrel.position.set(0, 0.02, 0.65);
+  rifle.add(rfBarrel);
+  // Muzzle brake at tip
+  const rfMuzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.06, 8), matGun);
+  rfMuzzle.rotation.x = Math.PI / 2;
+  rfMuzzle.position.set(0, 0.02, 0.92);
+  rifle.add(rfMuzzle);
+  // Stock (back, wood)
+  const rfStock = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.16, 0.24), matGunWood);
+  rfStock.position.set(0, -0.02, -0.3);
+  rifle.add(rfStock);
+  // Magazine (curved AK-style — angled forward)
+  const rfMag = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.22, 0.1), matGun);
+  rfMag.position.set(0, -0.16, -0.02);
+  rfMag.rotation.x = -0.15;
+  rifle.add(rfMag);
+  // Scope on top
+  const rfScope = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.034, 0.18, 10), matGun);
+  rfScope.rotation.x = Math.PI / 2;
+  rfScope.position.set(0, 0.11, -0.02);
+  rifle.add(rfScope);
+  // Scope lenses (red dot accent)
+  const rfLens = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.01, 10), matAccent);
+  rfLens.rotation.x = Math.PI / 2;
+  rfLens.position.set(0, 0.11, 0.075);
+  rifle.add(rfLens);
+  // Pistol grip
+  const rfGrip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.08), matGun);
+  rfGrip.position.set(0, -0.13, -0.18);
+  rfGrip.rotation.x = 0.25;
+  rifle.add(rfGrip);
+
+  // Position rifle in front of chest, angled slightly to the right
+  rifle.position.set(0.06, 0.92, 0.4);
+  rifle.rotation.y = -0.05;
   group.add(rifle);
 
   // Shadows
@@ -1556,6 +1599,8 @@ function createEnemy(x, z) {
     bobPhase: Math.random() * Math.PI * 2,
     // Limb refs for animation (hip & shoulder groups)
     legL, legR, armL, armR, head, rifle,
+    team: skin.id,
+    accentColor: skin.accent,
   };
   enemies.push(enemy);
   return enemy;
@@ -1563,7 +1608,8 @@ function createEnemy(x, z) {
 
 for (let i=0; i<6; i++) {
   const angle = (i/6) * Math.PI * 2;
-  createEnemy(Math.cos(angle)*15, Math.sin(angle)*15 - 5);
+  const team = i % 2 === 0 ? 'red' : 'blue';
+  createEnemy(Math.cos(angle)*15, Math.sin(angle)*15 - 5, team);
 }
 
 // ══════════════════════════════════════════════════════
@@ -1868,47 +1914,73 @@ function showHitMarker() {
   hm.classList.add('active');
 }
 
-function killEnemy(enemy) {
+// Visual tracer for AI-fired shots (so AI vs AI fights are visible)
+function spawnAITracer(start, end, color = 0xfbbf24) {
+  const geo = new THREE.BufferGeometry().setFromPoints([start.clone(), end.clone()]);
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95 });
+  const line = new THREE.Line(geo, mat);
+  scene.add(line);
+  let life = 8;
+  const tick = () => {
+    life--;
+    mat.opacity = (life / 8) * 0.9;
+    if (life <= 0) { scene.remove(line); geo.dispose(); mat.dispose(); return; }
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+function killEnemy(enemy, killer) {
   enemy.dead = true;
   enemy.group.rotation.z = Math.PI/2;
   enemy.group.position.y = -0.3;
   enemy.group.traverse(c => { if (c.material) { c.material = c.material.clone(); c.material.opacity = 0.5; c.material.transparent = true; } });
-  player.kills = (player.kills||0) + 1;
-  document.getElementById('killCount').textContent = player.kills;
-
-  // Award coins
-  addCoins(COIN_PER_KILL);
-  // Floating coin number at enemy
-  const screenPos = enemy.pos.clone();
-  screenPos.y += 1.5;
-  const proj = screenPos.project(camera);
-  if (proj.z < 1) {
-    const x = (proj.x * 0.5 + 0.5) * window.innerWidth;
-    const y = (-proj.y * 0.5 + 0.5) * window.innerHeight;
-    const cp = document.createElement('div');
-    cp.className = 'coinPop';
-    cp.textContent = '+' + COIN_PER_KILL + ' ◆';
-    cp.style.left = x + 'px';
-    cp.style.top = y + 'px';
-    document.getElementById('damageNumbers').appendChild(cp);
-    setTimeout(()=>cp.remove(), 900);
+  // Only credit player for kills they actually got (no killer = player)
+  if (!killer) {
+    player.kills = (player.kills||0) + 1;
+    document.getElementById('killCount').textContent = player.kills;
   }
 
+  // Award coins (player kills only)
+  if (!killer) {
+    addCoins(COIN_PER_KILL);
+    // Floating coin number at enemy
+    const screenPos = enemy.pos.clone();
+    screenPos.y += 1.5;
+    const proj = screenPos.project(camera);
+    if (proj.z < 1) {
+      const x = (proj.x * 0.5 + 0.5) * window.innerWidth;
+      const y = (-proj.y * 0.5 + 0.5) * window.innerHeight;
+      const cp = document.createElement('div');
+      cp.className = 'coinPop';
+      cp.textContent = '+' + COIN_PER_KILL + ' ◆';
+      cp.style.left = x + 'px';
+      cp.style.top = y + 'px';
+      document.getElementById('damageNumbers').appendChild(cp);
+      setTimeout(()=>cp.remove(), 900);
+    }
+  }
+
+  // Kill feed entry — show actual killer
   const feed = document.getElementById('killFeed');
   const msg = document.createElement('div');
   msg.className = 'killMsg';
-  msg.innerHTML = 'YOU <span style="color:#ff4655">▶</span> ENEMY <span style="color:#fbbf24">+' + COIN_PER_KILL + '◆</span>';
+  const killerLabel = killer ? `<span style="color:#${killer.accentColor.toString(16).padStart(6,'0')}">${killer.team.toUpperCase()}</span>` : 'YOU';
+  const victimColor = enemy.accentColor ? '#' + enemy.accentColor.toString(16).padStart(6,'0') : '#ff4655';
+  const reward = killer ? '' : ` <span style="color:#fbbf24">+${COIN_PER_KILL}◆</span>`;
+  msg.innerHTML = `${killerLabel} <span style="color:${victimColor}">▶</span> <span style="color:${victimColor}">${(enemy.team || 'enemy').toUpperCase()}</span>${reward}`;
   feed.appendChild(msg);
   setTimeout(() => msg.remove(), 3000);
 
-  // Respawn after delay
+  // Respawn after delay (same team)
+  const respawnTeam = enemy.team || (Math.random() < 0.5 ? 'red' : 'blue');
   setTimeout(() => {
     scene.remove(enemy.group);
     const idx = enemies.indexOf(enemy);
     if (idx>=0) enemies.splice(idx,1);
     const angle = Math.random() * Math.PI * 2;
     const r = 12 + Math.random()*8;
-    createEnemy(Math.cos(angle)*r, Math.sin(angle)*r);
+    createEnemy(Math.cos(angle)*r, Math.sin(angle)*r, respawnTeam);
   }, 2500);
 }
 
@@ -2153,24 +2225,43 @@ function update(dt) {
 
     let isMoving = false;
 
-    // AI: wander + aggro
-    const toPlayer = new THREE.Vector3().subVectors(player.pos, e.pos);
-    toPlayer.y = 0;
-    const dist = toPlayer.length();
+    // ── TARGET FIND: nearest hostile (other-team enemy OR player) ──
+    let target = null, targetDist = Infinity;
+    // Player as target (player is hostile to everyone)
+    if (player.health > 0 && gameStarted) {
+      const dx = player.pos.x - e.pos.x;
+      const dz = player.pos.z - e.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 25 && d < targetDist) {
+        targetDist = d;
+        target = { kind: 'player', x: player.pos.x, y: player.pos.y, z: player.pos.z, dx, dz };
+      }
+    }
+    // Other enemies (different team)
+    for (const o of enemies) {
+      if (o === e || o.dead || o.team === e.team) continue;
+      const dx = o.pos.x - e.pos.x;
+      const dz = o.pos.z - e.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 25 && d < targetDist) {
+        targetDist = d;
+        target = { kind: 'enemy', enemy: o, x: o.pos.x, y: o.pos.y + 1.4, z: o.pos.z, dx, dz };
+      }
+    }
 
-    if (dist < 25) {
+    if (target) {
       e.state = 'attack';
-      toPlayer.normalize();
-      // Face player (smoothly rotate)
-      const targetYaw = Math.atan2(toPlayer.x, toPlayer.z);
+      // Face target (smooth rotate)
+      const targetYaw = Math.atan2(target.dx, target.dz);
       let dy = targetYaw - e.group.rotation.y;
       while (dy >  Math.PI) dy -= Math.PI*2;
       while (dy < -Math.PI) dy += Math.PI*2;
       e.group.rotation.y += dy * Math.min(1, dt * 6);
 
-      // Move toward player if far
-      if (dist > 8) {
-        const step = toPlayer.clone().multiplyScalar(e.speed * dt);
+      // Move toward target if far
+      if (targetDist > 8) {
+        const len = targetDist || 1;
+        const step = new THREE.Vector3(target.dx/len, 0, target.dz/len).multiplyScalar(e.speed * dt);
         const np = e.pos.clone().add(step);
         if (!checkCollision(np, 0.5)) {
           e.pos.add(step);
@@ -2178,24 +2269,39 @@ function update(dt) {
         }
       }
 
-      // Shoot player (with LoS check against actual map geometry)
-      if (dist < 20 && performance.now() - e.lastShot > 1200) {
+      // Shoot target with LoS check + tracer
+      if (targetDist < 20 && performance.now() - e.lastShot > (target.kind === 'enemy' ? 900 : 1200)) {
         e.lastShot = performance.now();
         const origin = e.pos.clone(); origin.y += 1.4;
-        const toP = new THREE.Vector3().subVectors(player.pos, origin).normalize();
-        const rc = new THREE.Raycaster(origin, toP, 0, 30);
+        const targetPos = new THREE.Vector3(target.x, target.y, target.z);
+        const toT = new THREE.Vector3().subVectors(targetPos, origin).normalize();
+        const rc = new THREE.Raycaster(origin, toT, 0, 30);
         const blockers = mapMeshes.length > 0 ? mapMeshes : walls.map(w=>w.mesh);
         const hits = rc.intersectObjects(blockers, false);
-        if (hits.length === 0 || hits[0].distance > dist - 1) {
-          const baseDmg = 8 + Math.random()*6;
-          const pTarget = { armor: player.armor, health: player.health };
-          calculateDamage(baseDmg, null, pTarget);
-          player.armor = pTarget.armor;
-          player.health = pTarget.health;
-          document.getElementById('hud').style.boxShadow = 'inset 0 0 60px rgba(255,0,0,0.5)';
-          setTimeout(()=>document.getElementById('hud').style.boxShadow='', 100);
-          if (player.health <= 0) gameOver();
-          updateHUD();
+        const distToTarget = origin.distanceTo(targetPos);
+        if (hits.length === 0 || hits[0].distance > distToTarget - 1) {
+          // Visual: tracer line from muzzle
+          spawnAITracer(origin, targetPos, e.accentColor || 0xfbbf24);
+          if (target.kind === 'player') {
+            const baseDmg = 8 + Math.random()*6;
+            const pTarget = { armor: player.armor, health: player.health };
+            calculateDamage(baseDmg, null, pTarget);
+            player.armor = pTarget.armor;
+            player.health = pTarget.health;
+            document.getElementById('hud').style.boxShadow = 'inset 0 0 60px rgba(255,0,0,0.5)';
+            setTimeout(()=>document.getElementById('hud').style.boxShadow='', 100);
+            if (player.health <= 0) gameOver();
+            updateHUD();
+          } else {
+            // AI vs AI hit
+            const baseDmg = 14 + Math.random()*10;
+            const tt = { armor: target.enemy.armor, health: target.enemy.health };
+            calculateDamage(baseDmg, null, tt);
+            target.enemy.armor = tt.armor;
+            target.enemy.health = tt.health;
+            target.enemy.hitFlash = 1;
+            if (target.enemy.health <= 0) killEnemy(target.enemy, e);
+          }
         }
       }
     }
