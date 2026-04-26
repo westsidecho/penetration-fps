@@ -455,7 +455,7 @@ mapLoader.load('models/fps_tdm_map.glb', (gltf) => {
   mapRoot = map;
 
   // Build collision colliders from each mesh's world AABB
-  let totalMeshes = 0, colliderCount = 0;
+  let totalMeshes = 0, colliderCount = 0, skippedHuge = 0;
   map.traverse(c => {
     if (!c.isMesh) return;
     totalMeshes++;
@@ -465,8 +465,13 @@ mapLoader.load('models/fps_tdm_map.glb', (gltf) => {
     mapMeshes.push(c);
     const aabb = new THREE.Box3().setFromObject(c);
     const meshSz = aabb.getSize(new THREE.Vector3());
-    // Skip the floor itself (huge, flat) — handled by floor plane
-    if (meshSz.x > 50 && meshSz.z > 50 && meshSz.y < 1) return;
+    const meshVol = meshSz.x * meshSz.y * meshSz.z;
+    // Skip the floor itself (huge, flat)
+    if (meshSz.x > 40 && meshSz.z > 40 && meshSz.y < 2) return;
+    // Skip building shells / room hulls — anything big enough to contain the player.
+    // A typical building shell is 20×10×10 or larger (volume > 1000).
+    if (meshVol > 1000) { skippedHuge++; return; }
+    if (meshSz.y > 18) { skippedHuge++; return; }     // tall walls = envelope
     // Skip ultra-small fragments
     if (meshSz.x < 0.1 && meshSz.y < 0.1 && meshSz.z < 0.1) return;
     walls.push({ mesh: c, penType: 'Solid', aabb });
@@ -474,7 +479,7 @@ mapLoader.load('models/fps_tdm_map.glb', (gltf) => {
     c.userData.isWall = true;
     colliderCount++;
   });
-  console.log(`Map: ${totalMeshes} meshes, ${colliderCount} colliders`);
+  console.log(`Map: ${totalMeshes} meshes, ${colliderCount} colliders, ${skippedHuge} skipped (envelopes)`);
 
   mapLoaded = true;
   const lm = document.getElementById('mapLoadingMsg');
@@ -1163,20 +1168,51 @@ function mpVisualizeRemoteShot(msg, p) {
   }, 16);
 }
 
-// Find a spawn point that isn't inside a wall
+// Find a spawn point that isn't inside a wall.
+// Uses raycast-down to find the actual ground for whatever map is loaded.
 function safeSpawn(rangeX, offZ, rangeZ) {
-  for (let i=0; i<30; i++) {
-    const x = (Math.random()-0.5)*rangeX;
-    const z = (Math.random()-0.5)*rangeZ + offZ;
-    const candidate = new THREE.Vector3(x, 1.7, z);
-    if (!checkCollision(candidate, 0.5)) return candidate;
+  const downV = new THREE.Vector3(0, -1, 0);
+  const upV   = new THREE.Vector3(0,  1, 0);
+  // Prefer outdoor ground (low y), allow rooftop only if nothing else works
+  for (let pass = 0; pass < 2; pass++) {
+    const maxGroundY = pass === 0 ? 2.5 : 30; // first pass: outdoor only
+    for (let i = 0; i < 40; i++) {
+      const x = (Math.random()-0.5)*rangeX;
+      const z = (Math.random()-0.5)*rangeZ + offZ;
+      let groundY = 0;
+      if (mapMeshes.length > 0) {
+        const ray = new THREE.Raycaster(new THREE.Vector3(x, 80, z), downV, 0, 200);
+        const hits = ray.intersectObjects(mapMeshes, true);
+        if (hits.length === 0) continue;
+        groundY = hits[0].point.y;
+        if (groundY < -5 || groundY > maxGroundY) continue;
+      }
+      const candidate = new THREE.Vector3(x, groundY + 1.7, z);
+      if (checkCollision(candidate, 0.5)) continue;
+      // Headroom check
+      if (mapMeshes.length > 0) {
+        const upRay = new THREE.Raycaster(candidate, upV, 0, 1.5);
+        if (upRay.intersectObjects(mapMeshes, true).length > 0) continue;
+      }
+      // Horizontal clearance — at least 2m of open space in 8 directions
+      let clear = true;
+      for (let theta = 0; theta < Math.PI * 2; theta += Math.PI / 4) {
+        const probe = candidate.clone();
+        probe.x += Math.cos(theta) * 2;
+        probe.z += Math.sin(theta) * 2;
+        if (checkCollision(probe, 0.3)) { clear = false; break; }
+      }
+      if (!clear) continue;
+      return candidate;
+    }
   }
-  return new THREE.Vector3(0, 1.7, 18);
+  // Last resort: drop player from the sky
+  return new THREE.Vector3(0, 8, 0);
 }
 
 function mpRespawn() {
   player.health = 100; player.armor = 50;
-  const sp = safeSpawn(36, 0, 36);
+  const sp = safeSpawn(36, 0, 70);
   player.pos.copy(sp);
   mpSend({ type: 'respawn' });
   updateHUD();
@@ -1299,7 +1335,7 @@ function teleportToMap(key) {
   // Reset player state on teleport
   player.health = 100;
   player.armor = 50;
-  const sp = safeSpawn(28, 5, 24);
+  const sp = safeSpawn(36, 0, 70);
   player.pos.copy(sp);
   player.vel.set(0,0,0);
   player.kills = 0;
@@ -1320,7 +1356,7 @@ function teleportToMap(key) {
     // Notify others of our chosen weapon
     mpSend({ type: 'set_weapon', weaponKey: key });
     // Spread spawn positions in MP so players don't overlap
-    const sp = safeSpawn(28, 5, 24);
+    const sp = safeSpawn(36, 0, 70);
     player.pos.copy(sp);
   }
 
