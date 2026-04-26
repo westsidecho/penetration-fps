@@ -49,6 +49,8 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
 #score{position:absolute;top:20px;left:50%;transform:translateX(-50%);text-align:center}
 #score .kills{font-size:36px;font-weight:900;color:#ff4655}
 #score .label{font-size:10px;letter-spacing:4px;opacity:.5}
+#teamBadge{position:absolute;top:90px;left:50%;transform:translateX(-50%);font-size:11px;letter-spacing:3px;color:#888;background:rgba(20,20,30,.8);border:1px solid #3b6dff;padding:5px 14px;border-radius:2px}
+#teamBadge #teamName{color:#3b6dff;font-weight:900}
 
 #damageNumbers{position:fixed;inset:0;pointer-events:none;z-index:55;overflow:hidden}
 .dmgNum{position:absolute;font-weight:900;font-size:22px;text-shadow:0 0 6px #000,0 0 2px #000;animation:dmgFloat .9s ease-out forwards;pointer-events:none;white-space:nowrap}
@@ -259,6 +261,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
   <div id="crosshair"></div>
   <div id="hitMarker"></div>
   <div id="score"><div class="kills" id="killCount">0</div><div class="label">ELIMINATIONS</div></div>
+  <div id="teamBadge">YOUR TEAM ▸ <span id="teamName">BLUE</span></div>
   <div id="healthBar">
     <div class="label">HEALTH / ARMOR</div>
     <div class="hp"><div class="fill" id="hpFill" style="width:100%"></div><div class="num" id="hpNum">100</div></div>
@@ -506,6 +509,7 @@ const player = {
   vel: new THREE.Vector3(),
   yaw: 0, pitch: 0,
   health: 100, armor: 50,
+  team: 'blue',  // player fights for BLUE team — RED is hostile
   onGround: true,
   ammo: 30, magSize: 30, reserve: 90,
   reloading: false,
@@ -1935,14 +1939,16 @@ function killEnemy(enemy, killer) {
   enemy.group.rotation.z = Math.PI/2;
   enemy.group.position.y = -0.3;
   enemy.group.traverse(c => { if (c.material) { c.material = c.material.clone(); c.material.opacity = 0.5; c.material.transparent = true; } });
-  // Only credit player for kills they actually got (no killer = player)
-  if (!killer) {
+  // Only credit player for kills they actually got (no killer = player) — and not friendly fire
+  if (!killer && enemy.team !== player.team) {
     player.kills = (player.kills||0) + 1;
     document.getElementById('killCount').textContent = player.kills;
   }
 
-  // Award coins (player kills only)
-  if (!killer) {
+  // Award coins — only if PLAYER killed an enemy (no friendly fire bonus)
+  const isPlayerKill = !killer;
+  const isFriendly = isPlayerKill && enemy.team === player.team;
+  if (isPlayerKill && !isFriendly) {
     addCoins(COIN_PER_KILL);
     // Floating coin number at enemy
     const screenPos = enemy.pos.clone();
@@ -1967,7 +1973,7 @@ function killEnemy(enemy, killer) {
   msg.className = 'killMsg';
   const killerLabel = killer ? `<span style="color:#${killer.accentColor.toString(16).padStart(6,'0')}">${killer.team.toUpperCase()}</span>` : 'YOU';
   const victimColor = enemy.accentColor ? '#' + enemy.accentColor.toString(16).padStart(6,'0') : '#ff4655';
-  const reward = killer ? '' : ` <span style="color:#fbbf24">+${COIN_PER_KILL}◆</span>`;
+  const reward = isPlayerKill && !isFriendly ? ` <span style="color:#fbbf24">+${COIN_PER_KILL}◆</span>` : (isFriendly ? ` <span style="color:#ff4655">[FRIENDLY FIRE]</span>` : '');
   msg.innerHTML = `${killerLabel} <span style="color:${victimColor}">▶</span> <span style="color:${victimColor}">${(enemy.team || 'enemy').toUpperCase()}</span>${reward}`;
   feed.appendChild(msg);
   setTimeout(() => msg.remove(), 3000);
@@ -2225,10 +2231,10 @@ function update(dt) {
 
     let isMoving = false;
 
-    // ── TARGET FIND: nearest hostile (other-team enemy OR player) ──
+    // ── TARGET FIND: nearest hostile (other-team enemy OR player IF different team) ──
     let target = null, targetDist = Infinity;
-    // Player as target (player is hostile to everyone)
-    if (player.health > 0 && gameStarted) {
+    // Player as target — only if on different team
+    if (player.health > 0 && gameStarted && e.team !== player.team) {
       const dx = player.pos.x - e.pos.x;
       const dz = player.pos.z - e.pos.z;
       const d = Math.hypot(dx, dz);
