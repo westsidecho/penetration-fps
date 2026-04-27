@@ -1653,6 +1653,131 @@ document.addEventListener('mouseup', e => {
 document.addEventListener('contextmenu', e => e.preventDefault());
 
 // ══════════════════════════════════════════════════════
+//   AUDIO — procedural sounds via Web Audio API (no asset files)
+// ══════════════════════════════════════════════════════
+let audioCtx = null;
+function getAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e) { return null; }
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+// White-noise burst — used as the basis for gunshots and impacts
+function _noiseBuffer(ctx, dur, falloff = 3) {
+  const n = Math.max(1, Math.floor(ctx.sampleRate * dur));
+  const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random()*2 - 1) * Math.pow(1 - i/n, falloff);
+  return buf;
+}
+
+// Different gun "voices" via filter cutoff + duration + bass thump
+const GUN_PROFILES = {
+  rifle:   { dur: 0.16, hi: 2400, lo: 180, vol: 0.45, bass: 70 },
+  carbine: { dur: 0.13, hi: 2800, lo: 220, vol: 0.40, bass: 85 },
+  battle:  { dur: 0.20, hi: 2000, lo: 140, vol: 0.55, bass: 60 },
+  bullpup: { dur: 0.14, hi: 2600, lo: 200, vol: 0.42, bass: 78 },
+  lmg:     { dur: 0.18, hi: 2200, lo: 160, vol: 0.50, bass: 65 },
+  hmg:     { dur: 0.22, hi: 1800, lo: 130, vol: 0.60, bass: 50 },
+  minigun: { dur: 0.10, hi: 3200, lo: 240, vol: 0.35, bass: 95 },
+  marksman:{ dur: 0.30, hi: 1600, lo: 110, vol: 0.65, bass: 45 },
+  sniper:  { dur: 0.45, hi: 1400, lo: 95,  vol: 0.75, bass: 38 },
+  rocket:  { dur: 0.55, hi: 1100, lo: 70,  vol: 0.85, bass: 30 },
+  grenade: { dur: 0.25, hi: 1500, lo: 100, vol: 0.55, bass: 55 },
+};
+
+function playGunshot(profileKey = 'rifle', volMul = 1) {
+  const ctx = getAudio(); if (!ctx) return;
+  const p = GUN_PROFILES[profileKey] || GUN_PROFILES.rifle;
+  const t = ctx.currentTime;
+  // Crack: noise → low-pass sweep → envelope
+  const noise = ctx.createBufferSource();
+  noise.buffer = _noiseBuffer(ctx, p.dur, 4);
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(p.hi, t);
+  filter.frequency.exponentialRampToValueAtTime(p.lo, t + p.dur);
+  const gN = ctx.createGain();
+  gN.gain.setValueAtTime(p.vol * volMul, t);
+  gN.gain.exponentialRampToValueAtTime(0.001, t + p.dur);
+  noise.connect(filter); filter.connect(gN); gN.connect(ctx.destination);
+  noise.start(t);
+  // Bass thump (sub-frequency oscillator) for that "punch"
+  const osc = ctx.createOscillator();
+  osc.frequency.setValueAtTime(p.bass * 2, t);
+  osc.frequency.exponentialRampToValueAtTime(p.bass * 0.5, t + p.dur * 0.6);
+  const gO = ctx.createGain();
+  gO.gain.setValueAtTime(p.vol * volMul * 0.7, t);
+  gO.gain.exponentialRampToValueAtTime(0.001, t + p.dur);
+  osc.connect(gO); gO.connect(ctx.destination);
+  osc.start(t); osc.stop(t + p.dur);
+}
+
+// Distance-attenuated 3D gunshot for AI-fired weapons
+function playGunshot3D(worldPos, profileKey = 'rifle', baseVol = 1) {
+  const dist = camera.position.distanceTo(worldPos);
+  const vol = Math.max(0, baseVol * Math.exp(-dist / 25));
+  if (vol < 0.02) return;
+  playGunshot(profileKey, vol);
+}
+
+// Footstep — short low-frequency thump
+function playFootstep(volMul = 1) {
+  const ctx = getAudio(); if (!ctx) return;
+  const t = ctx.currentTime;
+  const noise = ctx.createBufferSource();
+  noise.buffer = _noiseBuffer(ctx, 0.08, 2);
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass'; filter.frequency.value = 350;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.18 * volMul, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+  noise.connect(filter); filter.connect(g); g.connect(ctx.destination);
+  noise.start(t);
+}
+
+// Reload — three mechanical clicks
+function playReload() {
+  const ctx = getAudio(); if (!ctx) return;
+  const click = (delay, freq, vol) => {
+    const t = ctx.currentTime + delay;
+    const osc = ctx.createOscillator();
+    osc.type = 'square'; osc.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(t); osc.stop(t + 0.05);
+  };
+  click(0.00, 600, 0.18);     // mag eject
+  click(0.40, 800, 0.15);     // mag insert
+  click(0.95, 1100, 0.13);    // chamber
+}
+
+// Hit marker beep when player lands a hit
+function playHitBeep() {
+  const ctx = getAudio(); if (!ctx) return;
+  const t = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  osc.type = 'sine'; osc.frequency.value = 1400;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.12, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+  osc.connect(g); g.connect(ctx.destination);
+  osc.start(t); osc.stop(t + 0.07);
+}
+
+// Weapon → audio profile mapping (uses the WEAPONS key)
+const WEAPON_AUDIO = {
+  BE1:'rifle', BE2:'rifle', BE3:'carbine', BE4:'battle', BE5:'bullpup',
+  GL1:'grenade', MG1:'lmg', MG2:'hmg', MG3:'minigun', MG4:'lmg', MG5:'lmg',
+  MSR:'marksman', RPG:'rocket', SNIPER1:'sniper'
+};
+
+// ══════════════════════════════════════════════════════
 //   SHOOTING
 // ══════════════════════════════════════════════════════
 const RANGE = 80;
@@ -1665,6 +1790,8 @@ function shoot() {
   player.lastShot = now;
   player.ammo--;
   updateHUD();
+  // Gunshot sound (per-weapon profile)
+  playGunshot(WEAPON_AUDIO[selectedWeaponKey] || 'rifle');
 
   // Muzzle flash
   if (flash) {
@@ -1829,6 +1956,7 @@ function reload() {
   player.reloading = true;
   player.reloadStart = performance.now();
   player.aiming = false; // can't ADS while reloading
+  playReload();
   document.getElementById('gunName').textContent = 'RELOADING...';
   setTimeout(() => {
     const needed = player.magSize - player.ammo;
@@ -1912,6 +2040,7 @@ function showPenNumber(worldPos, wallType, reduction) {
 }
 
 function showHitMarker() {
+  playHitBeep();
   const hm = document.getElementById('hitMarker');
   hm.classList.remove('active');
   void hm.offsetWidth;
@@ -2115,8 +2244,19 @@ function update(dt) {
       if (!checkCollision(stepPos)) player.pos.copy(stepPos);
     }
   };
+  const beforeX = player.pos.x, beforeZ = player.pos.z;
   tryAxis('x', move.x);
   tryAxis('z', move.z);
+  // Footstep sound: every ~0.45m of horizontal travel while on ground
+  const moved = Math.hypot(player.pos.x - beforeX, player.pos.z - beforeZ);
+  if (player.onGround && moved > 0) {
+    player._stepDist = (player._stepDist || 0) + moved;
+    const stepInterval = keys['ShiftLeft'] || keys['ShiftRight'] ? 0.55 : 0.45;
+    if (player._stepDist > stepInterval) {
+      player._stepDist = 0;
+      playFootstep(0.9);
+    }
+  }
 
   // Multi-level ground + jump + gravity
   const groundY = getGroundHeight(player.pos);
@@ -2288,6 +2428,7 @@ function update(dt) {
         if (hits.length === 0 || hits[0].distance > distToTarget - 1) {
           // Visual: tracer line from muzzle
           spawnAITracer(origin, targetPos, e.accentColor || 0xfbbf24);
+          playGunshot3D(origin, 'rifle', 0.8);
           if (target.kind === 'player') {
             const baseDmg = 8 + Math.random()*6;
             const pTarget = { armor: player.armor, health: player.health };
