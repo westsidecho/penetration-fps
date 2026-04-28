@@ -434,76 +434,226 @@ function createBlock(x, y, z, w, h, d, color) {
   return mesh;
 }
 
-// ── GLB MAP (loaded async — populates `walls` once ready) ──
-let mapLoaded = false;
-let mapMeshes = [];   // for raycasting (bullets, ground LoS)
+// ── PROCEDURAL RIVALS-STYLE ARENA (60×60, multi-tier, neon accents) ──
+let mapLoaded = true;       // procedural — ready instantly
+let mapMeshes = [];         // empty → collision falls back to AABB walls[]
 let mapRoot = null;
 
-const mapLoader = new THREE.GLTFLoader();
-mapLoader.load('models/fps_tdm_map.glb', (gltf) => {
-  const map = gltf.scene;
+(function buildRivalsArena() {
+  const C = {
+    white:  0xeeeae0, dark:   0x2a2e3a, grey:   0x6a6c75,
+    red:    0xff4655, blue:   0x3b6dff, yellow: 0xfbbf24,
+    green:  0x10b981, cyan:   0x22d3ee, purple: 0xa855f7,
+    pink:   0xf472b6, orange: 0xf97316, lime:   0x84cc16,
+  };
 
-  // Auto-fit to a ~80x80 arena, ground at y=0
-  map.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(map);
-  const sz = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(sz.x, sz.z);
-  const targetMax = 80;
-  if (maxDim > 0) map.scale.setScalar(targetMax / maxDim);
-  map.updateMatrixWorld(true);
-  const box2 = new THREE.Box3().setFromObject(map);
-  const center2 = box2.getCenter(new THREE.Vector3());
-  map.position.x -= center2.x;
-  map.position.z -= center2.z;
-  map.position.y -= box2.min.y; // sit bottom on y=0
-  map.updateMatrixWorld(true);
+  // ── CENTER 4-TIER MEGA TOWER ──
+  createBlock(0, 1,   0, 9,   2, 9,   C.white);     // Tier 1 base
+  createBlock(0, 3,   0, 6.5, 2, 6.5, C.red);       // Tier 2 - red
+  createBlock(0, 5,   0, 4.5, 2, 4.5, C.dark);      // Tier 3 - dark
+  createBlock(0, 7,   0, 2.8, 2, 2.8, C.yellow);    // Tier 4 - sniper nest
+  // Sniper nest railings (dark posts on 4 sides except entry)
+  createBlock( 1.5, 8.4, 0,    0.2, 0.8, 2.8, C.dark);
+  createBlock(-1.5, 8.4, 0,    0.2, 0.8, 2.8, C.dark);
+  createBlock( 0,   8.4,  1.5, 2.8, 0.8, 0.2, C.dark);
+  // Stairs spiraling up: south→tier1, north→tier2, east→tier3, west→tier4
+  for (let i=0; i<5; i++) createBlock(0, 0.25 + i*0.4, 6 - i*1.0, 4.5, 0.4, 1.0, C.white);
+  for (let i=0; i<5; i++) createBlock(0, 2.25 + i*0.4, -3.5 + i*0.7, 3.5, 0.4, 0.7, C.white);
+  for (let i=0; i<5; i++) createBlock(2.5 + i*0.5, 4.25 + i*0.4, 0, 0.5, 0.4, 2.5, C.white);
+  for (let i=0; i<4; i++) createBlock(-1.7 + i*0.5, 6.25 + i*0.4, 0, 0.5, 0.4, 1.8, C.white);
 
-  scene.add(map);
-  mapRoot = map;
+  // ── 4 CORNER TEAM SNIPER TOWERS (with stair-up + roof platform) ──
+  const towers = [
+    {x:-23, z:-23, c:C.red,    bias:[1, 1]},
+    {x: 23, z:-23, c:C.blue,   bias:[-1,1]},
+    {x:-23, z: 23, c:C.green,  bias:[1,-1]},
+    {x: 23, z: 23, c:C.purple, bias:[-1,-1]},
+  ];
+  for (const t of towers) {
+    // Square tower body
+    createBlock(t.x, 2, t.z, 4, 4, 4, t.c);
+    // Roof platform with team-color edge
+    createBlock(t.x, 4.4, t.z, 4.6, 0.4, 4.6, C.dark);
+    // Wall on outer side (cover from snipers)
+    createBlock(t.x + Math.sign(t.x)*1.7, 5.2, t.z, 0.3, 1.4, 4, C.white);
+    createBlock(t.x, 5.2, t.z + Math.sign(t.z)*1.7, 4, 1.4, 0.3, C.white);
+    // Stairs from inner side toward center
+    const sx = t.bias[0], sz = t.bias[1];
+    for (let i=0; i<8; i++) {
+      createBlock(
+        t.x + sx*(2.5 + i*0.7),
+        0.3 + i*0.5,
+        t.z + sz*(2.5 + i*0.7),
+        1.6, 0.5, 1.6, C.white
+      );
+    }
+  }
 
-  // Build collision colliders from each mesh's world AABB
-  let totalMeshes = 0, colliderCount = 0, skippedHuge = 0;
-  map.traverse(c => {
-    if (!c.isMesh) return;
-    totalMeshes++;
-    c.castShadow = true;
-    c.receiveShadow = true;
-    if (c.geometry && !c.geometry.boundingBox) c.geometry.computeBoundingBox();
-    mapMeshes.push(c);
-    // ALL map meshes block bullets as solid walls (so building exteriors stop shots)
-    c.userData.isWall = true;
-    c.userData.penType = 'Solid';
-    const aabb = new THREE.Box3().setFromObject(c);
-    const meshSz = aabb.getSize(new THREE.Vector3());
-    const meshVol = meshSz.x * meshSz.y * meshSz.z;
-    // The walls[] array is used as a fallback for AABB collision; we now skip
-    // huge building shells from THAT array so AABB doesn't trap players inside,
-    // but the mesh itself stays in mapMeshes for raycast collision + bullets.
-    if (meshSz.x > 40 && meshSz.z > 40 && meshSz.y < 2) return;
-    if (meshVol > 1000) { skippedHuge++; return; }
-    if (meshSz.y > 18) { skippedHuge++; return; }
-    if (meshSz.x < 0.1 && meshSz.y < 0.1 && meshSz.z < 0.1) return;
-    walls.push({ mesh: c, penType: 'Solid', aabb });
-    colliderCount++;
+  // ── 4 MID-SIDE 2-STORY BUILDINGS (cyan/pink/orange/purple) ──
+  const buildings = [
+    {x: 0,  z:-23, w:9,  h:5, d:3,  c:C.cyan,   accent:C.dark},
+    {x: 0,  z: 23, w:9,  h:5, d:3,  c:C.pink,   accent:C.dark},
+    {x:-23, z: 0,  w:3,  h:5, d:9,  c:C.orange, accent:C.dark},
+    {x: 23, z: 0,  w:3,  h:5, d:9,  c:C.purple, accent:C.dark},
+  ];
+  for (const b of buildings) {
+    createBlock(b.x, b.h/2,        b.z, b.w,        b.h, b.d,       b.c);
+    createBlock(b.x, b.h + 0.3,    b.z, b.w + 0.4,  0.4, b.d + 0.4, b.accent);
+    // Roof access ramp (stairs from base ground)
+    if (b.w > b.d) {
+      // North/South building — stairs going up east side
+      for (let i=0; i<10; i++) {
+        createBlock(b.x + b.w/2 + 0.3 + i*0.4, 0.25 + i*0.4, b.z, 0.4, 0.4, 1.5, C.white);
+      }
+    } else {
+      // East/West — stairs going up north side
+      for (let i=0; i<10; i++) {
+        createBlock(b.x, 0.25 + i*0.4, b.z + b.d/2 + 0.3 + i*0.4, 1.5, 0.4, 0.4, C.white);
+      }
+    }
+  }
+
+  // ── SCATTERED COVER CRATES (16 bright crates) ──
+  const crateColors = [C.red, C.blue, C.yellow, C.green, C.cyan, C.purple, C.pink, C.orange, C.lime];
+  let placed = 0, attempts = 0;
+  const noSpawnZones = [
+    [0, 0, 6],              // center tower (radius 6)
+    [-23, -23, 5], [23, -23, 5], [-23, 23, 5], [23, 23, 5], // corner towers
+    [0, -23, 6], [0, 23, 6], [-23, 0, 6], [23, 0, 6],       // mid buildings
+    [0, 12, 4],             // player spawn (south side)
+  ];
+  while (placed < 18 && attempts < 90) {
+    attempts++;
+    const x = (Math.random()-0.5)*52;
+    const z = (Math.random()-0.5)*52;
+    let blocked = false;
+    for (const [zx, zz, zr] of noSpawnZones) {
+      if (Math.hypot(x-zx, z-zz) < zr) { blocked = true; break; }
+    }
+    if (blocked) continue;
+    // 50/50 single crate vs stack of 2
+    const stack = Math.random() < 0.3 ? 2 : 1;
+    for (let s=0; s<stack; s++) {
+      createBlock(x, 0.7 + s*1.4, z, 1.4, 1.4, 1.4, crateColors[(placed+s) % crateColors.length]);
+    }
+    placed++;
+  }
+
+  // ── BARREL CLUSTERS (cylinder cover for variety) ──
+  for (let cluster=0; cluster<4; cluster++) {
+    const cx = (Math.random()-0.5)*40;
+    const cz = (Math.random()-0.5)*40;
+    if (Math.hypot(cx, cz) < 8) continue;
+    for (let i=0; i<3; i++) {
+      const bx = cx + (Math.random()-0.5)*1.5;
+      const bz = cz + (Math.random()-0.5)*1.5;
+      const barrel = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.45, 0.45, 1.2, 12),
+        new THREE.MeshStandardMaterial({ color: cluster%2 ? C.red : C.yellow, roughness:0.7, metalness:0.3 })
+      );
+      barrel.position.set(bx, 0.6, bz);
+      barrel.castShadow = true; barrel.receiveShadow = true;
+      barrel.userData = { penType:'Solid', isWall: true };
+      scene.add(barrel);
+      const aabb = new THREE.Box3().setFromObject(barrel);
+      walls.push({ mesh: barrel, penType:'Solid', aabb });
+    }
+  }
+
+  // ── PERIMETER (high dark walls + glowing yellow top strip) ──
+  const PER = 30;
+  [
+    [ 0, 4.5,-PER, PER*2, 9, 1, C.dark],
+    [ 0, 4.5, PER, PER*2, 9, 1, C.dark],
+    [-PER, 4.5, 0, 1, 9, PER*2, C.dark],
+    [ PER, 4.5, 0, 1, 9, PER*2, C.dark],
+  ].forEach(p => createBlock(p[0],p[1],p[2],p[3],p[4],p[5],p[6]));
+
+  // Glowing neon strip on top of perimeter (cosmetic, no collision)
+  [
+    [ 0, 9.3,-PER, PER*2, 0.5, 1.4, C.yellow],
+    [ 0, 9.3, PER, PER*2, 0.5, 1.4, C.cyan],
+    [-PER, 9.3, 0, 1.4, 0.5, PER*2, C.pink],
+    [ PER, 9.3, 0, 1.4, 0.5, PER*2, C.green],
+  ].forEach(p => {
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(p[3], p[4], p[5]),
+      new THREE.MeshStandardMaterial({ color: p[6], emissive: p[6], emissiveIntensity: 0.8 })
+    );
+    m.position.set(p[0], p[1], p[2]); scene.add(m);
   });
-  console.log(`Map: ${totalMeshes} meshes, ${colliderCount} colliders, ${skippedHuge} skipped (envelopes)`);
 
-  mapLoaded = true;
+  // ── DECORATIVE GLOWING PILLARS OUTSIDE ARENA ──
+  const decoColors = [C.red, C.blue, C.yellow, C.green, C.purple, C.cyan, C.pink, C.orange];
+  for (let i=0; i<16; i++) {
+    const a = (i/16)*Math.PI*2;
+    const r = 38 + (i%3)*3;
+    const x = Math.cos(a)*r, z = Math.sin(a)*r;
+    const h = 8 + (i%4)*2;
+    const color = decoColors[i % decoColors.length];
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.55, 0.55, h, 10),
+      new THREE.MeshStandardMaterial({ color, roughness:0.6 })
+    );
+    pillar.position.set(x, h/2, z); pillar.castShadow = true;
+    scene.add(pillar);
+    const top = new THREE.Mesh(
+      new THREE.SphereGeometry(0.65, 12, 10),
+      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.9 })
+    );
+    top.position.set(x, h+0.5, z); scene.add(top);
+  }
+
+  // ── DEDICATED TRAINING ANNEX (west of main arena, clear shooting alley) ──
+  const ANX_X = -55;
+  // Floor pad (visible from outside)
+  const annexFloor = new THREE.Mesh(
+    new THREE.PlaneGeometry(14, 30),
+    new THREE.MeshStandardMaterial({ color: 0xc8b888, roughness: 0.9 })
+  );
+  annexFloor.rotation.x = -Math.PI/2;
+  annexFloor.position.set(ANX_X, 0.01, 0);
+  annexFloor.receiveShadow = true;
+  scene.add(annexFloor);
+  // Annex walls (4 sides)
+  createBlock(ANX_X + 7.5, 3, 0,    1, 6, 30, 0x3a4458);
+  createBlock(ANX_X - 7.5, 3, 0,    1, 6, 30, 0x3a4458);
+  createBlock(ANX_X,        3,  15, 14, 6, 1, 0x3a4458);
+  createBlock(ANX_X,        3, -15, 14, 6, 1, 0x3a4458);
+  // Annex glowing yellow accent strips on top
+  [
+    [ANX_X + 7.5, 6.3, 0,    1.2, 0.4, 30],
+    [ANX_X - 7.5, 6.3, 0,    1.2, 0.4, 30],
+    [ANX_X,       6.3,  15, 14, 0.4, 1.2],
+    [ANX_X,       6.3, -15, 14, 0.4, 1.2],
+  ].forEach(p => {
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(p[3], p[4], p[5]),
+      new THREE.MeshStandardMaterial({ color: 0xfbbf24, emissive: 0xfbbf24, emissiveIntensity: 0.7 })
+    );
+    m.position.set(p[0], p[1], p[2]); scene.add(m);
+  });
+  // "TRAINING" sign on the wall (procedural — colored emissive blocks)
+  const signBg = new THREE.Mesh(
+    new THREE.BoxGeometry(6, 1.5, 0.2),
+    new THREE.MeshStandardMaterial({ color: 0x000000 })
+  );
+  signBg.position.set(ANX_X, 5.5, -14.4);
+  scene.add(signBg);
+  const signText = new THREE.Mesh(
+    new THREE.BoxGeometry(5.5, 1.0, 0.05),
+    new THREE.MeshStandardMaterial({ color: 0xfbbf24, emissive: 0xfbbf24, emissiveIntensity: 1 })
+  );
+  signText.position.set(ANX_X, 5.5, -14.3);
+  scene.add(signText);
+
+  // Expose annex coords globally so setupTrainingArea() knows where to spawn
+  window._ANNEX_X = ANX_X;
+
+  // ── HIDE LOADING MSG ──
   const lm = document.getElementById('mapLoadingMsg');
   if (lm) lm.style.display = 'none';
-}, (xhr) => {
-  if (xhr.lengthComputable) {
-    const pct = (xhr.loaded / xhr.total * 100).toFixed(0);
-    const lm = document.getElementById('mapLoadingMsg');
-    if (lm) lm.textContent = `LOADING MAP… ${pct}%`;
-  }
-}, (err) => {
-  console.error('Map GLB load error', err);
-  const lm = document.getElementById('mapLoadingMsg');
-  if (lm) { lm.textContent = 'MAP LOAD FAILED — using empty arena'; lm.style.color = '#ff4655'; }
-  // Fallback: keep just the floor + a small box at center
-  createBlock(0, 1, 0, 4, 2, 4, 0xff4655);
-});
+})();
 
 // ══════════════════════════════════════════════════════
 //   PLAYER
@@ -1369,12 +1519,11 @@ function teleportToMap(key) {
     document.getElementById('trainingHud').style.display = 'block';
     document.getElementById('teamBadge').style.display = 'none';
     document.getElementById('score').style.display = 'none';
-    // Spawn behind the targets, looking at the range
-    if (trainingTargets.length > 0) {
-      player.pos.set(0, trainingTargets[0].baseY + 1.7, 2);
-      player.yaw = 0;
-      player.pitch = 0;
-    }
+    // Teleport into the training annex (player faces north toward targets)
+    const ANX_X = window._ANNEX_X != null ? window._ANNEX_X : -55;
+    player.pos.set(ANX_X, 1.7, 12);
+    player.yaw = 0;             // default yaw = looking -z (north)
+    player.pitch = 0;
   } else {
     document.getElementById('trainingHud').style.display = 'none';
     document.getElementById('teamBadge').style.display = '';
@@ -1504,28 +1653,23 @@ function setupTrainingArea() {
   const hudEl = document.getElementById('trainingHits');
   if (hudEl) hudEl.textContent = '0';
 
-  // Find a clear ground spot near origin to anchor the range
-  const baseY = (() => {
-    if (mapMeshes.length > 0) {
-      const ray = new THREE.Raycaster(new THREE.Vector3(0, 60, -8), new THREE.Vector3(0,-1,0), 0, 200);
-      const h = ray.intersectObjects(mapMeshes, false);
-      if (h.length > 0) return h[0].point.y;
-    }
-    return 0;
-  })();
+  // Use the dedicated annex (built into the procedural map at x=-55)
+  const ANX_X = window._ANNEX_X != null ? window._ANNEX_X : -55;
+  const baseY = 0;
 
-  // Three rows of humanoid silhouettes at increasing distance
-  const distances = [-7, -13, -20];   // close / mid / far
+  // 3 rows of humanoid silhouettes at increasing distance from spawn
+  // Player spawns at (ANX_X, 1.7, 12) facing -z (north into the alley)
   const xOffsets = [-3, -1, 1, 3];
-  for (let row = 0; row < distances.length; row++) {
+  const distances = [4, -2, -10];   // close / mid / far (relative to spawn at z=12)
+  for (const z of distances) {
     for (const xo of xOffsets) {
-      createTrainingTarget(xo, baseY + 1.0, distances[row], 'humanoid');
+      createTrainingTarget(ANX_X + xo, baseY + 1.0, z, 'humanoid');
     }
   }
-  // Plus a few bullseyes at varied heights for headshot practice
-  createTrainingTarget(-5, baseY + 1.4, -10, 'bullseye');
-  createTrainingTarget( 5, baseY + 1.4, -10, 'bullseye');
-  createTrainingTarget( 0, baseY + 1.8, -25, 'bullseye');
+  // 3 bullseyes at varied heights for headshot practice
+  createTrainingTarget(ANX_X - 4, baseY + 1.6, -2,  'bullseye');
+  createTrainingTarget(ANX_X + 4, baseY + 1.6, -2,  'bullseye');
+  createTrainingTarget(ANX_X,     baseY + 2.2, -12, 'bullseye');
 }
 
 // Knock down a target (animate fall + respawn)
