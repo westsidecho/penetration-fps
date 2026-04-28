@@ -46,10 +46,10 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
 #ammo .count .mag{color:#888;font-size:28px;margin-left:8px}
 #ammo .gun{font-size:12px;letter-spacing:4px;opacity:.7;margin-top:4px}
 
-#score{position:absolute;top:20px;left:50%;transform:translateX(-50%);text-align:center}
-#score .kills{font-size:36px;font-weight:900;color:#ff4655}
-#score .label{font-size:10px;letter-spacing:4px;opacity:.5}
-#teamBadge{position:absolute;top:90px;left:50%;transform:translateX(-50%);font-size:11px;letter-spacing:3px;color:#888;background:rgba(20,20,30,.8);border:1px solid #3b6dff;padding:5px 14px;border-radius:2px}
+#score{position:absolute;top:80px;left:50%;transform:translateX(-50%);text-align:center}
+#score .kills{font-size:28px;font-weight:900;color:#ff4655}
+#score .label{font-size:9px;letter-spacing:3px;opacity:.5}
+#teamBadge{position:absolute;top:140px;left:50%;transform:translateX(-50%);font-size:11px;letter-spacing:3px;color:#888;background:rgba(20,20,30,.8);border:1px solid #3b6dff;padding:5px 14px;border-radius:2px}
 #teamBadge #teamName{color:#3b6dff;font-weight:900}
 #trainingHud{position:absolute;top:90px;left:50%;transform:translateX(-50%);font-size:14px;letter-spacing:3px;color:#fbbf24;background:rgba(20,20,30,.85);border:1px solid #fbbf24;padding:8px 18px;border-radius:2px;font-weight:900}
 #trainingHud #trainingHits{color:#fff;font-size:18px}
@@ -155,6 +155,17 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
 #coinDisplay::before{content:'◆ ';color:#fbbf24}
 #hudCoins{position:absolute;top:20px;right:30px;color:#fbbf24;font-size:16px;font-weight:900;letter-spacing:2px;text-shadow:0 0 4px #000}
 #hudCoins::before{content:'◆ ';color:#fbbf24}
+.bigText{position:absolute;top:38%;left:50%;transform:translate(-50%,-50%);font-size:64px;font-weight:900;letter-spacing:8px;text-shadow:0 0 20px rgba(0,0,0,.8),0 0 40px currentColor;animation:bigKill 1.2s ease-out forwards;pointer-events:none;z-index:90;font-family:'Segoe UI Black','Arial Black',sans-serif}
+@keyframes bigKill{0%{opacity:0;transform:translate(-50%,-50%) scale(.4);filter:blur(20px)}15%{opacity:1;transform:translate(-50%,-50%) scale(1.15);filter:blur(0)}25%{transform:translate(-50%,-50%) scale(1)}80%{opacity:1;transform:translate(-50%,-50%) scale(1)}100%{opacity:0;transform:translate(-50%,-110%) scale(.9)}}
+#scoreboard{position:absolute;top:20px;left:50%;transform:translateX(-50%);background:rgba(15,15,30,.85);border:1px solid #444;border-radius:4px;padding:6px 16px;display:flex;gap:18px;align-items:center;font-weight:900;letter-spacing:3px;font-size:18px}
+#scoreboard .red{color:#ff4655;text-shadow:0 0 8px rgba(255,70,85,.6)}
+#scoreboard .blue{color:#3b6dff;text-shadow:0 0 8px rgba(59,109,255,.6)}
+#scoreboard .vs{color:#666;font-size:11px;letter-spacing:2px}
+#scoreboard .target{font-size:10px;color:#666;letter-spacing:2px;margin-left:8px}
+#dmgIndicator{position:absolute;inset:0;pointer-events:none;z-index:80}
+#dmgIndicator div{position:absolute;left:50%;top:50%;width:90px;height:90px;border-top:3px solid #ff4655;transform-origin:50% 50%;opacity:0;transition:opacity .4s}
+#dmgIndicator div.show{opacity:.85;animation:dmgFade 1s ease-out forwards}
+@keyframes dmgFade{0%{opacity:.9}100%{opacity:0}}
 .coinPop{position:absolute;font-weight:900;font-size:18px;color:#fbbf24;text-shadow:0 0 6px #000;animation:dmgFloat .9s ease-out forwards;pointer-events:none}
 @keyframes tpFlash{0%{opacity:0}15%{opacity:1}100%{opacity:0}}
 @keyframes tpLabel{0%{opacity:0;transform:translate(-50%,-50%) scale(.3);filter:blur(10px)}30%{opacity:1;transform:translate(-50%,-50%) scale(1);filter:blur(0)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.4);filter:blur(4px)}}
@@ -266,6 +277,13 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;color:#fff;user
   <div id="score"><div class="kills" id="killCount">0</div><div class="label">ELIMINATIONS</div></div>
   <div id="teamBadge">YOUR TEAM ▸ <span id="teamName">BLUE</span></div>
   <div id="trainingHud" style="display:none">🎯 HITS ▸ <span id="trainingHits">0</span></div>
+  <div id="scoreboard">
+    <span class="blue" id="blueScore">0</span>
+    <span class="vs">VS</span>
+    <span class="red" id="redScore">0</span>
+    <span class="target">FIRST TO <span id="killTarget">25</span></span>
+  </div>
+  <div id="dmgIndicator"><div></div></div>
   <div id="healthBar">
     <div class="label">HEALTH / ARMOR</div>
     <div class="hp"><div class="fill" id="hpFill" style="width:100%"></div><div class="num" id="hpNum">100</div></div>
@@ -1519,6 +1537,7 @@ function teleportToMap(key) {
     document.getElementById('trainingHud').style.display = 'block';
     document.getElementById('teamBadge').style.display = 'none';
     document.getElementById('score').style.display = 'none';
+    document.getElementById('scoreboard').style.display = 'none';
     // Teleport into the training annex (player faces north toward targets)
     const ANX_X = window._ANNEX_X != null ? window._ANNEX_X : -55;
     player.pos.set(ANX_X, 1.7, 12);
@@ -1528,7 +1547,11 @@ function teleportToMap(key) {
     document.getElementById('trainingHud').style.display = 'none';
     document.getElementById('teamBadge').style.display = '';
     document.getElementById('score').style.display = '';
+    document.getElementById('scoreboard').style.display = mp.active ? 'none' : 'flex';
+    resetRound();
   }
+  // Start procedural BGM (audio context unlocks on first interaction)
+  startBGM();
 
   // Spawn AI enemies only in solo combat mode (multiplayer = humans only, training = no enemies)
   if (!mp.active && !trainingMode) {
@@ -1567,12 +1590,56 @@ function teleportToMap(key) {
 }
 
 // ══════════════════════════════════════════════════════
-//   ENEMIES + TRAINING TARGETS
+//   ENEMIES + TRAINING TARGETS + TEAM SCORE
 // ══════════════════════════════════════════════════════
 const enemies = [];
 const trainingTargets = [];
 let trainingMode = false;
 let trainingHits = 0;
+
+const KILL_TARGET = 25;
+let teamScore = { blue: 0, red: 0 };
+let roundOver = false;
+
+function addTeamScore(team) {
+  if (roundOver) return;
+  teamScore[team] = (teamScore[team] || 0) + 1;
+  document.getElementById(team + 'Score').textContent = teamScore[team];
+  if (teamScore[team] >= KILL_TARGET) {
+    roundOver = true;
+    showVictoryScreen(team);
+  }
+}
+function resetRound() {
+  teamScore = { blue: 0, red: 0 };
+  roundOver = false;
+  _killStreakCount = 0;
+  document.getElementById('blueScore').textContent = '0';
+  document.getElementById('redScore').textContent = '0';
+  document.getElementById('killTarget').textContent = KILL_TARGET;
+}
+function showVictoryScreen(winner) {
+  const won = winner === player.team;
+  bigText(won ? 'VICTORY!' : 'DEFEAT', won ? '#10b981' : '#ff4655', 4000);
+  // Build summary card
+  const ov = document.getElementById('gameOver');
+  ov.innerHTML = `
+    <h1 style="color:${won?'#10b981':'#ff4655'}">${won ? 'VICTORY' : 'DEFEAT'}</h1>
+    <div class="stats">
+      <div style="font-size:22px;margin-bottom:18px">
+        <span style="color:#3b6dff">BLUE ${teamScore.blue}</span>
+        <span style="color:#666;margin:0 14px">VS</span>
+        <span style="color:#ff4655">RED ${teamScore.red}</span>
+      </div>
+      <div>YOUR KILLS: <b>${player.kills || 0}</b></div>
+      <div>COINS EARNED: <b style="color:#fbbf24">+${(player.kills || 0) * COIN_PER_KILL}◆</b></div>
+    </div>
+    <button onclick="location.reload()">PLAY AGAIN</button>
+  `;
+  ov.style.display = 'flex';
+  document.exitPointerLock();
+  gameStarted = false;
+}
 
 // A target dummy: cardboard humanoid silhouette + bullseye disc.
 // Falls flat when shot, pops back up after 1.5s.
@@ -2162,6 +2229,194 @@ const WEAPON_AUDIO = {
 };
 
 // ══════════════════════════════════════════════════════
+//   JUICE — screen shake, hit-stop, particles, kill cards
+// ══════════════════════════════════════════════════════
+let _shakeAmt = 0, _shakeDecay = 0.85;
+function screenShake(amount, decay = 0.85) {
+  _shakeAmt = Math.max(_shakeAmt, amount);
+  _shakeDecay = decay;
+}
+
+let _hitStopUntil = 0;
+function hitStop(ms = 35) {
+  _hitStopUntil = Math.max(_hitStopUntil, performance.now() + ms);
+}
+
+const _particles = [];
+function spawnSparks(pos, normal, color = 0xfbbf24, count = 5, size = 0.04) {
+  for (let i = 0; i < count; i++) {
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(size, size, size),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1, depthWrite: false })
+    );
+    m.position.copy(pos);
+    const vel = normal.clone().multiplyScalar(1.5 + Math.random() * 2);
+    vel.x += (Math.random() - 0.5) * 4;
+    vel.y += Math.random() * 3 + 0.5;
+    vel.z += (Math.random() - 0.5) * 4;
+    scene.add(m);
+    _particles.push({ mesh: m, vel, life: 0.35, max: 0.35, gravity: 9 });
+  }
+}
+function spawnBlood(pos, normal) {
+  for (let i = 0; i < 8; i++) {
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(0.05 + Math.random() * 0.04, 5, 4),
+      new THREE.MeshBasicMaterial({ color: 0xc41a1a, transparent: true, opacity: 1, depthWrite: false })
+    );
+    m.position.copy(pos);
+    const vel = normal.clone().multiplyScalar(1 + Math.random() * 1.5);
+    vel.x += (Math.random() - 0.5) * 3;
+    vel.y += Math.random() * 2 + 0.5;
+    vel.z += (Math.random() - 0.5) * 3;
+    scene.add(m);
+    _particles.push({ mesh: m, vel, life: 0.55, max: 0.55, gravity: 12 });
+  }
+}
+function spawnExplosion(pos, color = 0xff6a00) {
+  for (let i = 0; i < 24; i++) {
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.08, 0.08),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1, depthWrite: false })
+    );
+    m.position.copy(pos);
+    const a = Math.random() * Math.PI * 2;
+    const e = Math.random() * Math.PI - Math.PI / 2;
+    const speed = 4 + Math.random() * 6;
+    const vel = new THREE.Vector3(
+      Math.cos(a) * Math.cos(e) * speed,
+      Math.sin(e) * speed + 2,
+      Math.sin(a) * Math.cos(e) * speed
+    );
+    scene.add(m);
+    _particles.push({ mesh: m, vel, life: 0.6, max: 0.6, gravity: 6 });
+  }
+}
+function updateParticles(dt) {
+  for (let i = _particles.length - 1; i >= 0; i--) {
+    const p = _particles[i];
+    p.life -= dt;
+    if (p.life <= 0) {
+      scene.remove(p.mesh);
+      p.mesh.geometry.dispose();
+      p.mesh.material.dispose();
+      _particles.splice(i, 1);
+      continue;
+    }
+    p.mesh.position.x += p.vel.x * dt;
+    p.mesh.position.y += p.vel.y * dt;
+    p.mesh.position.z += p.vel.z * dt;
+    p.vel.y -= p.gravity * dt;
+    p.vel.multiplyScalar(0.96);
+    p.mesh.material.opacity = p.life / p.max;
+  }
+}
+
+// Killstreak tracking + announcement
+let _killStreakCount = 0;
+let _killStreakTimer = 0;
+const KILL_NAMES = [null, null, 'DOUBLE KILL', 'TRIPLE KILL', 'QUAD KILL', 'PENTA KILL', 'RAMPAGE'];
+function announceKillstreak() {
+  _killStreakCount++;
+  if (_killStreakTimer) clearTimeout(_killStreakTimer);
+  _killStreakTimer = setTimeout(() => { _killStreakCount = 0; }, 3000);
+  if (_killStreakCount >= 2) {
+    bigText(KILL_NAMES[Math.min(_killStreakCount, KILL_NAMES.length - 1)] || 'GODLIKE', '#fbbf24', 1500);
+    playKillJingle(_killStreakCount);
+  }
+}
+function bigText(text, color = '#ff4655', dur = 1200) {
+  const el = document.createElement('div');
+  el.className = 'bigText';
+  el.textContent = text;
+  el.style.color = color;
+  document.getElementById('hud').appendChild(el);
+  setTimeout(() => el.remove(), dur);
+}
+function playKillJingle(streak) {
+  const ctx = getAudio(); if (!ctx) return;
+  const dest = _master(); if (!dest) return;
+  const t = ctx.currentTime;
+  // Rising chord per streak level
+  const baseFreq = 440 + Math.min(streak, 6) * 80;
+  for (let i = 0; i < 3; i++) {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = baseFreq * (1 + i * 0.5);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.08, t + i * 0.06);
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.06 + 0.18);
+    osc.connect(g); g.connect(dest);
+    osc.start(t + i * 0.06); osc.stop(t + i * 0.06 + 0.2);
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//   BGM — procedural ambient synthwave loop
+// ══════════════════════════════════════════════════════
+let _bgmStarted = false;
+function startBGM() {
+  if (_bgmStarted) return;
+  const ctx = getAudio(); if (!ctx) return;
+  const dest = _master(); if (!dest) return;
+  _bgmStarted = true;
+
+  // Sub-bass drone
+  const drone = ctx.createOscillator();
+  drone.type = 'sawtooth';
+  drone.frequency.value = 55;
+  const droneLP = ctx.createBiquadFilter();
+  droneLP.type = 'lowpass'; droneLP.frequency.value = 250;
+  const droneG = ctx.createGain(); droneG.gain.value = 0.06;
+  drone.connect(droneLP); droneLP.connect(droneG); droneG.connect(dest);
+  drone.start();
+
+  // Pad chord (3 oscillators)
+  const padNotes = [220, 277, 330];
+  const padG = ctx.createGain(); padG.gain.value = 0.04;
+  for (const f of padNotes) {
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.value = f;
+    // Slow detune for that drifty synthwave feel
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 0.15;
+    const lfoG = ctx.createGain(); lfoG.gain.value = 1.5;
+    lfo.connect(lfoG); lfoG.connect(o.frequency);
+    lfo.start();
+    o.connect(padG);
+    o.start();
+  }
+  const padLP = ctx.createBiquadFilter();
+  padLP.type = 'lowpass'; padLP.frequency.value = 1200;
+  padG.connect(padLP); padLP.connect(dest);
+
+  // Arpeggio sequencer — schedules notes ahead of time
+  const arpNotes = [220, 277, 330, 440, 330, 277];
+  let step = 0;
+  const arpLoop = () => {
+    const t0 = ctx.currentTime;
+    for (let i = 0; i < 8; i++) {
+      const f = arpNotes[(step + i) % arpNotes.length];
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = f * 2;
+      const g = ctx.createGain();
+      const at = t0 + i * 0.32;
+      g.gain.setValueAtTime(0.022, at);
+      g.gain.exponentialRampToValueAtTime(0.001, at + 0.22);
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 1500;
+      o.connect(lp); lp.connect(g); g.connect(dest);
+      o.start(at); o.stop(at + 0.25);
+    }
+    step += 8;
+    setTimeout(arpLoop, 8 * 320);
+  };
+  arpLoop();
+}
+
+// ══════════════════════════════════════════════════════
 //   SHOOTING
 // ══════════════════════════════════════════════════════
 const RANGE = 80;
@@ -2176,6 +2431,9 @@ function shoot() {
   updateHUD();
   // Gunshot sound (per-weapon profile)
   playGunshot(WEAPON_AUDIO[selectedWeaponKey] || 'rifle');
+  // Screen shake — bigger guns shake more
+  const recoilShake = (currentWeapon.recoil || 0.03) * 4;
+  screenShake(player.aiming ? recoilShake * 0.5 : recoilShake);
 
   // Muzzle flash
   if (flash) {
@@ -2260,6 +2518,8 @@ function traceShot(origin, dir, damage, remainingRange) {
   // Training target hit
   if (hit.object.userData._trainingTargetRef) {
     hitTrainingTarget(hit.object.userData._trainingTargetRef);
+    spawnSparks(hit.point, hit.face ? hit.face.normal : new THREE.Vector3(0,1,0), 0xfbbf24, 6);
+    hitStop(20);
     return;
   }
 
@@ -2278,6 +2538,15 @@ function traceShot(origin, dir, damage, remainingRange) {
 
     showDamageNumber(hit.point, result.armorDamage, result.healthDamage, isHead);
     showHitMarker();
+    // JUICE: blood spray + hit-stop + extra flair on headshot
+    spawnBlood(hit.point, hit.face ? hit.face.normal.clone().negate() : new THREE.Vector3(0,1,0));
+    hitStop(isHead ? 60 : 30);
+    if (isHead) {
+      screenShake(0.4);
+      bigText('HEADSHOT', '#fbbf24', 800);
+    } else {
+      screenShake(0.15);
+    }
 
     if (enemy.health <= 0) killEnemy(enemy);
     return;
@@ -2289,10 +2558,12 @@ function traceShot(origin, dir, damage, remainingRange) {
     if (penType === 'Solid') {
       // impact only
       showImpact(hit.point, hit.face.normal);
+      spawnSparks(hit.point, hit.face.normal, 0xddd5b8, 4, 0.035);
       return;
     }
 
     showImpact(hit.point, hit.face.normal, 0xfbbf24);
+    spawnSparks(hit.point, hit.face.normal, 0xfbbf24, 5);
     const reduction = PENETRATION[penType];
     const newDamage = damage * (1 - reduction);
 
@@ -2441,6 +2712,15 @@ function showPenNumber(worldPos, wallType, reduction) {
   setTimeout(() => el.remove(), 900);
 }
 
+function showDamageIndicator(angleDeg) {
+  const ind = document.querySelector('#dmgIndicator div');
+  if (!ind) return;
+  ind.style.transform = `translate(-50%,-50%) rotate(${angleDeg}deg) translateY(-90px)`;
+  ind.classList.remove('show');
+  void ind.offsetWidth;  // restart animation
+  ind.classList.add('show');
+}
+
 function showHitMarker() {
   playHitBeep();
   const hm = document.getElementById('hitMarker');
@@ -2470,10 +2750,22 @@ function killEnemy(enemy, killer) {
   enemy.group.rotation.z = Math.PI/2;
   enemy.group.position.y = -0.3;
   enemy.group.traverse(c => { if (c.material) { c.material = c.material.clone(); c.material.opacity = 0.5; c.material.transparent = true; } });
-  // Only credit player for kills they actually got (no killer = player) — and not friendly fire
+
+  // Death blood splash
+  spawnBlood(enemy.group.position.clone().add(new THREE.Vector3(0, 1.2, 0)),
+             new THREE.Vector3(0, 1, 0));
+
+  // Score: enemy died → opposing team gets a point
+  const scoringTeam = enemy.team === 'red' ? 'blue' : 'red';
+  addTeamScore(scoringTeam);
+
+  // Player credit (no killer arg = player killed) + killstreak
   if (!killer && enemy.team !== player.team) {
     player.kills = (player.kills||0) + 1;
     document.getElementById('killCount').textContent = player.kills;
+    announceKillstreak();
+    bigText('KILL', '#fbbf24', 600);
+    screenShake(0.25);
   }
 
   // Award coins — only if PLAYER killed an enemy (no friendly fire bonus)
@@ -2621,6 +2913,15 @@ function updateHUD() {
 function update(dt) {
   if (!gameStarted) return;
 
+  // ── HIT-STOP — freeze simulation briefly when landing/taking hits ──
+  if (performance.now() < _hitStopUntil) {
+    updateParticles(dt * 0.05);    // particles still drift slowly
+    return;
+  }
+
+  // Always tick particles even when game running
+  updateParticles(dt);
+
   // Movement
   const speed = (keys['ShiftLeft'] ? 9 : 5) * dt;
   const forward = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
@@ -2678,10 +2979,38 @@ function update(dt) {
   }
 
   // Camera
+  // ── MOVEMENT JUICE: view bob + sprint FOV pulse + camera roll on strafe ──
+  const isMovingPlayer = player.onGround && (Math.abs(move.x) + Math.abs(move.z)) > 0.01;
+  const isSprinting = (keys['ShiftLeft'] || keys['ShiftRight']) && isMovingPlayer;
+  player._bobT = (player._bobT || 0) + dt * (isSprinting ? 14 : (isMovingPlayer ? 9 : 0));
+  const viewBobY = isMovingPlayer && !player.aiming ? Math.sin(player._bobT) * 0.05 : 0;
+  const viewBobX = isMovingPlayer && !player.aiming ? Math.cos(player._bobT * 0.5) * 0.04 : 0;
+  // Camera roll when strafing
+  const targetRoll = (move.x ? -Math.sign(move.x) * 0.04 : 0) * (isSprinting ? 1.5 : 1);
+  player._roll = (player._roll || 0) + (targetRoll - (player._roll || 0)) * 0.12;
+  // Sprint FOV pulse — only widen when not aiming (ADS controls FOV separately)
+  if (!player.aiming && !player.reloading) {
+    const baseFov = isSprinting ? 84 : GUN_POSE_HIP.fov;
+    GUN_POSE_HIP.fov = GUN_POSE_HIP.fov + (baseFov - GUN_POSE_HIP.fov) * 0.08;
+  }
+
   camera.position.copy(player.pos);
+  camera.position.y += viewBobY;
+  camera.position.x += viewBobX * Math.cos(player.yaw);
+  camera.position.z += viewBobX * Math.sin(player.yaw);
+
+  // ── SCREEN SHAKE — random offset, decays per frame ──
+  if (_shakeAmt > 0.001) {
+    camera.position.x += (Math.random() - 0.5) * _shakeAmt * 0.3;
+    camera.position.y += (Math.random() - 0.5) * _shakeAmt * 0.3;
+    camera.position.z += (Math.random() - 0.5) * _shakeAmt * 0.2;
+    _shakeAmt *= _shakeDecay;
+  }
+
   camera.rotation.order = 'YXZ';
   camera.rotation.y = player.yaw;
-  camera.rotation.x = player.pitch;
+  camera.rotation.x = player.pitch + (_shakeAmt > 0.001 ? (Math.random() - 0.5) * _shakeAmt * 0.05 : 0);
+  camera.rotation.z = player._roll || 0;
 
   // ─── Gun pose: hip vs ADS lerp + reload animation + bob ───
   const target = player.aiming && !player.reloading ? GUN_POSE_ADS : GUN_POSE_HIP;
@@ -2830,14 +3159,37 @@ function update(dt) {
       while (dy < -Math.PI) dy += Math.PI*2;
       e.group.rotation.y += dy * Math.min(1, dt * 6);
 
-      // Move toward target if far
-      if (targetDist > 8) {
-        const len = targetDist || 1;
-        const step = new THREE.Vector3(target.dx/len, 0, target.dz/len).multiplyScalar(e.speed * dt);
-        const np = e.pos.clone().add(step);
+      // Smarter movement: retreat when low HP, otherwise close + occasional strafe
+      const len = targetDist || 1;
+      const fwd = new THREE.Vector3(target.dx/len, 0, target.dz/len);
+      const lowHP = (e.health + e.armor * 0.5) < 35;
+      let moveVec = null;
+      if (lowHP) {
+        // Run AWAY from target
+        moveVec = fwd.clone().multiplyScalar(-e.speed * dt * 1.2);
+      } else if (targetDist > 8) {
+        moveVec = fwd.clone().multiplyScalar(e.speed * dt);
+      } else if (targetDist < 5) {
+        // Too close — back up a bit
+        moveVec = fwd.clone().multiplyScalar(-e.speed * dt * 0.5);
+      }
+      // Periodic strafe (perpendicular sidestep)
+      e._strafeT = (e._strafeT || 0) + dt;
+      if (!e._strafeDir || e._strafeT > 1.2 + Math.random()*0.8) {
+        e._strafeDir = (Math.random() < 0.5 ? -1 : 1);
+        e._strafeT = 0;
+      }
+      const sideways = new THREE.Vector3(-fwd.z, 0, fwd.x).multiplyScalar(e.speed * dt * 0.7 * e._strafeDir);
+      const totalMove = (moveVec || new THREE.Vector3()).add(sideways);
+      if (totalMove.lengthSq() > 0) {
+        const np = e.pos.clone().add(totalMove);
         if (!checkCollision(np, 0.5)) {
-          e.pos.add(step);
+          e.pos.copy(np);
           isMoving = true;
+        } else {
+          // try strafe-only if forward is blocked
+          const np2 = e.pos.clone().add(sideways);
+          if (!checkCollision(np2, 0.5)) { e.pos.copy(np2); isMoving = true; }
         }
       }
 
@@ -2863,6 +3215,11 @@ function update(dt) {
             player.health = pTarget.health;
             document.getElementById('hud').style.boxShadow = 'inset 0 0 60px rgba(255,0,0,0.5)';
             setTimeout(()=>document.getElementById('hud').style.boxShadow='', 100);
+            // JUICE: shake + directional damage indicator pointing at attacker
+            screenShake(0.5);
+            const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z;
+            const angDeg = Math.atan2(dx, dz) * 180 / Math.PI - player.yaw * 180 / Math.PI;
+            showDamageIndicator(angDeg);
             if (player.health <= 0) gameOver();
             updateHUD();
           } else {
