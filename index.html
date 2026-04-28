@@ -1889,7 +1889,10 @@ function createEnemy(x, z, teamOverride) {
 
   const enemy = {
     group, health: 100, armor: 50, maxHealth: 100, maxArmor: 50,
-    pos: group.position, speed: 2.5 + Math.random() * 1.5,
+    // pos is INDEPENDENT of group.position (group.position gets bob offset every frame).
+    // Always read/write enemy AI logic against e.pos; render copies it to group.position + bob.
+    pos: new THREE.Vector3(x, 0, z),
+    speed: 2.5 + Math.random() * 1.5,
     state: 'patrol', target: new THREE.Vector3(x, 0, z),
     hitFlash: 0, dead: false, lastShot: 0,
     bobPhase: Math.random() * Math.PI * 2,
